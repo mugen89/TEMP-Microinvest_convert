@@ -17,7 +17,11 @@ public sealed class WindowTests : IDisposable
 {
     private readonly string _folder = Path.Combine(Path.GetTempPath(), "mic-win-" + Guid.NewGuid());
 
-    public WindowTests() => Directory.CreateDirectory(_folder);
+    public WindowTests()
+    {
+        Directory.CreateDirectory(_folder);
+        ExcelFiles.Elevated = false;   // whatever the tests run as
+    }
 
     public void Dispose() => Directory.Delete(_folder, true);
 
@@ -246,6 +250,37 @@ public sealed class WindowTests : IDisposable
             Assert.Fail(c.GetType().Name + " " + c.Text);
         });
     });
+
+    /// <summary>Started as administrator: Explorer drops the older way, with a message.</summary>
+    [Fact]
+    public void A_program_started_as_administrator_takes_files_too()
+    {
+        ExcelFiles.Elevated = true;
+        OnScreen(main =>
+        {
+            SendMessage(main.Handle, 0x0233, Files(ForeignFile, SaleFile, Path.Combine(_folder, "друго.pdf")), 0);
+            Pump();
+            Assert.Equal([OperationKind.Sale, OperationKind.Foreign], Modules(main).Select(m => m.Kind).Order());
+
+            var sales = Modules(main).Single(m => m.Kind == OperationKind.Sale);
+            string other = new TestSheet(Layout.Sales).Sale(1d, "0000000099", 10, 2, ("AB", 10d), ("AC", 2d)).Save(_folder, "други продажби.xls");
+            SendMessage(sales.Handle, 0x0233, Files(other), 0);
+            Pump();
+            Assert.Equal("0000000099", Assert.Single(sales.Batch!.Documents).Number);
+        });
+    }
+
+    // What WM_DROPFILES carries: a header of 20 bytes, the paths, each with its end, and one more.
+    private static nint Files(params string[] paths)
+    {
+        byte[] names = System.Text.Encoding.Unicode.GetBytes(string.Join('\0', paths) + "\0\0");
+        nint memory = Marshal.AllocHGlobal(20 + names.Length);
+        Marshal.Copy(new byte[20], 0, memory, 20);
+        Marshal.WriteInt32(memory, 0, 20);   // where the names start
+        Marshal.WriteInt32(memory, 16, 1);   // they are Unicode
+        Marshal.Copy(names, 0, memory + 20, names.Length);
+        return memory;                       // freed by the one who takes it
+    }
 
     // ----- operating -----
 

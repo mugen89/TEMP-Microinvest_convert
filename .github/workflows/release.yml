@@ -29,7 +29,11 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Test
-        run: dotnet test -c Release
+        run: dotnet test -c Release --logger "trx;LogFileName=tests.trx" --results-directory results
+
+      - name: What failed
+        if: failure()
+        run: ./.github/show-failed-tests.ps1 results
 
       - name: Publish
         run: dotnet publish src/MicroinvestConvert.App -p:PublishProfile=win-x64

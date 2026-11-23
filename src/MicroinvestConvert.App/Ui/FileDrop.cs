@@ -9,6 +9,9 @@ internal static class ExcelFiles
 {
     private static readonly string[] Extensions = [".xlsx", ".xls", ".xlsm"];
 
+    /// <summary>Started as administrator. Set by the tests, which run both ways.</summary>
+    internal static bool Elevated { get; set; } = Environment.IsPrivilegedProcess;
+
     public static bool IsExcel(string path) => Extensions.Contains(Path.GetExtension(path).ToLowerInvariant());
 
     /// <summary>The Excel files of a drag; none when it carries something else.</summary>
@@ -31,7 +34,7 @@ internal static class ExcelFiles
     /// </summary>
     public static void AcceptDrops(Control control, Action<IReadOnlyList<string>> dropped, Action<bool>? hover = null)
     {
-        if (Environment.IsPrivilegedProcess)
+        if (Elevated)
         {
             // Windows does not let Explorer drop on a program started as administrator the usual way.
             if (control is Form form) _ = new ElevatedDrop(form, dropped);
