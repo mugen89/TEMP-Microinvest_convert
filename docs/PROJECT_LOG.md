@@ -20,14 +20,13 @@ What is going on in this project: what the program does, what was decided and by
 
 | | |
 |---|---|
-| **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`) and **1.1.1** (tag `v1.1.1`, commit `b41f29c`). 1.0.0 was only ever a program on the owner's computer |
-| **Made, not released** | **1.2.0** – currency, exchange rates, a database, clients. Committed, without a tag; a test build is on the owner's computer (`publish/1.2.0`, starting date 01.01.2026) |
+| **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`), **1.1.1** (tag `v1.1.1`, commit `b41f29c`) and **1.2.0** (tag `v1.2.0`, the code is commit `c5c09ab`) – currency, exchange rates, a database, clients. 1.0.0 was only ever a program on the owner's computer |
 | **Modules** | Покупки, Продажби, Чуждестранни – exports of AI Accounting → `.xls` for Делта Pro, everything in euro |
-| **Tests** | 600, green on the computer |
+| **Tests** | 600, green on the computer and on GitHub |
 | **With the accountant** | `Deal_Type.md`: 71 rows with a box to tick, 27 questions. Nothing has come back yet; В5, В17, В20, В23 and В27 carry the owner's decision |
 | **Never done yet** | **importing a written file into Делта Pro** |
 | **Update in the program** | seen working on the owner's computer: their copy of 1.1.0 is 1.1.1 since 16:12 on 2026-11-23, with 1.1.0 kept |
-| **Next** | the owner's test of 1.2.0 and the word to publish it; the import test; then §7 |
+| **Next** | the owner's test of 1.2.0 and of the update to it; the import test; then §7 |
 
 ---
 
@@ -277,7 +276,7 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
   - What had been kept before a write failed, and rates whose note of the download could not be kept, were not used by the open files.
   - The first build on GitHub (`3893556`) was red: a download counted as over a moment before its note was kept, so on a slower machine a test took the database away meanwhile → it is over when the note is kept. In the program both happen on the window thread, so nothing could come between them there.
 - **Verified:** §6.
-- **Committed** with the owner's permission, **not released**: there is no tag. The version is 1.2.0 and everything for a release is ready.
+- **Published:** tag `v1.2.0`, with the owner's permission. The code was pushed first, and the tag was set when it was green on GitHub (`c5c09ab`).
 
 ### 2026-11-23 (5) — This log
 
@@ -369,7 +368,7 @@ To check again after a change of the engine: `dotnet test`, then the scripts in 
 6. В5 – is 3 right for a Bulgarian supplier outside the VAT ledger?
 7. В24–В26 – the rate of a currency account, the date of the rate, the rate of a credit note.
 
-**For the owner:** the import into Делта Pro; the test of 1.2.0 and whether to publish it; what else „Проверки“ should check.
+**For the owner:** the import into Делта Pro; the test of 1.2.0; what else „Проверки“ should check.
 
 **Found in new real files, not changed** (the rules are not clear, or it is no part of what was asked):
 
