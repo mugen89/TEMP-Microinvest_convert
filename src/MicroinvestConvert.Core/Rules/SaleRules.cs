@@ -71,19 +71,19 @@ internal static class SaleRules
             switch (group.Status)
             {
                 case VatStatus.Unresolved:
-                    doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.VatMismatch,
+                    doc.Issues.Add(new Issue(IssueCode.VatMismatch,
                         $"ДДС {Money(group.Vat)} не е {Percent(group.DeclaredRate)} от {Money(group.Base)} " +
                         $"(очаквано {Money(group.Expected)}, разлика {Money(group.Difference)}). Проверете."));
                     break;
 
                 case VatStatus.Zero:
-                    doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.VatZeroButDeclared,
+                    doc.Issues.Add(new Issue(IssueCode.VatZeroButDeclared,
                         $"Основа {Money(group.Base)} е в колоната за {Percent(group.DeclaredRate)}, но няма ДДС. " +
                         "Ако е доставка по чл. 163а, тя изисква и колони Q и R (следваща версия)."));
                     break;
 
                 case VatStatus.WithinTolerance:
-                    doc.Issues.Add(new Issue(IssueSeverity.Info, IssueCode.VatWithinTolerance,
+                    doc.Issues.Add(new Issue(IssueCode.VatWithinTolerance,
                         $"ДДС {Money(group.Vat)} се различава с {Money(group.Difference)} от {Percent(group.DeclaredRate)} върху " +
                         $"{Money(group.Base)} – в допустимата разлика."));
                     break;
@@ -91,7 +91,7 @@ internal static class SaleRules
         }
 
         if (doc.Lines.Any(l => l.Bucket == LedgerBucket.SaleNoDiary && l.DealTypeOverride == null))
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.NoDiary,
+            doc.Issues.Add(new Issue(IssueCode.OutsideLedger,
                 "Има сума без стойност в колоните за дневника – вид сделка 1, не влиза в дневника. " +
                 "Ако трябва да влезе, изберете вид сделка."));
 
@@ -106,7 +106,7 @@ internal static class SaleRules
                 .Where(n => n > 0).ToList();
             if (cells.Count == 0 || cells.Contains(column)) continue;
 
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.JournalCellMismatch,
+            doc.Issues.Add(new Issue(IssueCode.JournalCellMismatch,
                 $"Файлът сочи клетка {line.JournalCell} в дневника (кол. AA), а сумата е в колоната за к. {column}. " +
                 $"Взет е вид сделка {line.AutoDealType}."));
             break;
@@ -116,7 +116,7 @@ internal static class SaleRules
         int[] needVies = [DealTypes.SaleIntraCommunitySupply, DealTypes.SaleServicesArticle21, DealTypes.SaleTriangular];
         var used = doc.Lines.Select(l => l.DealType).Where(needVies.Contains).Distinct().ToList();
         if (used.Count > 0 && !new PartnerIdentity(doc.Eik, doc.VatNumber).IsOtherEuMember)
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.ViesPartner,
+            doc.Issues.Add(new Issue(IssueCode.ViesPartner,
                 $"Вид сделка {string.Join(", ", used)} влиза във VIES, а контрагентът няма ДДС номер от друга държава членка" +
                 (doc.VatNumber.Length > 0 ? $" ({doc.VatNumber})." : doc.PartnerId.Length > 0 ? $" ({doc.PartnerId})." : ".")));
     }

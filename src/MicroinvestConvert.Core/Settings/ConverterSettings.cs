@@ -1,3 +1,5 @@
+using MicroinvestConvert.Core.Checks;
+using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
 
 namespace MicroinvestConvert.Core.Settings;
@@ -75,8 +77,22 @@ public sealed class ConverterSettings
     public string DefaultCashAccount { get; set; } = "";
 
     public DealTypeFormat DealTypeFormat { get; set; } = DealTypeFormat.PerAmount;
-    public VatLines VatLines { get; set; } = VatLines.PerDealType;
-    public NoDiaryMode NoDiary { get; set; } = NoDiaryMode.Internal;
+    public VatLines VatLines { get; set; } = VatLines.PerAccount;
+    public NoDiaryMode NoDiary { get; set; } = NoDiaryMode.NoCredit;
+
+    /// <summary>
+    /// The checks that are switched off, by the name of their code. Names and not codes, so that
+    /// a file written by a newer version is still read by an older one.
+    /// </summary>
+    public List<string> ChecksOff { get; set; } = [];
+
+    public bool IsOff(IssueCode code) => ChecksOff.Contains(code.ToString()) && CheckCatalog.Get(code).CanBeOff;
+
+    public void SetOff(IssueCode code, bool off)
+    {
+        ChecksOff.RemoveAll(c => c == code.ToString());
+        if (off && CheckCatalog.Get(code).CanBeOff) ChecksOff.Add(code.ToString());
+    }
 
     /// <summary>Account in the file (with its analytic, e.g. 601/5) → account in Делта Pro.</summary>
     public Dictionary<string, string> Accounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -84,6 +100,7 @@ public sealed class ConverterSettings
     public ConverterSettings Clone()
     {
         var copy = (ConverterSettings)MemberwiseClone();
+        copy.ChecksOff = [.. ChecksOff];
         copy.Accounts = new Dictionary<string, string>(Accounts, StringComparer.OrdinalIgnoreCase);
         return copy;
     }

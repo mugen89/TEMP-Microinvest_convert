@@ -1,7 +1,8 @@
-﻿// miconvert <source> [--out file.xls] [--rows] [--issues] [--skipped]
+// miconvert <source> [--out file.xls] [--rows] [--issues] [--skipped] [--no-diary 1|3|skip] [--vat total|account]
 //
 // Converts an AI Accounting export the way the program does it with its default settings.
-// --rows prints the rows tab-separated (A..P), which makes two versions easy to compare.
+// --rows prints the rows tab-separated (A..P), which makes two versions easy to compare;
+// --no-diary and --vat are the two settings of „Настройки → Файл" that change them most.
 
 using System.Text;
 using MicroinvestConvert.Core.Model;
@@ -14,18 +15,23 @@ Console.OutputEncoding = new UTF8Encoding(false);
 
 if (args.Length == 0)
 {
-    Console.Error.WriteLine("miconvert <source> [--out file.xls] [--rows] [--issues] [--skipped]");
+    Console.Error.WriteLine("miconvert <source> [--out file.xls] [--rows] [--issues] [--skipped] [--no-diary 1|3|skip] [--vat total|account]");
     return 2;
 }
 
 string source = args[0];
-string? output = null;
-for (int i = 1; i < args.Length - 1; i++)
-    if (args[i] == "--out") output = args[i + 1];
+string? Value(string name) => Array.IndexOf(args, name) is var i && i > 0 && i + 1 < args.Length ? args[i + 1] : null;
+string? output = Value("--out");
+
+var settings = new ConverterSettings();
+if (Value("--no-diary") is { } noDiary)
+    settings.NoDiary = noDiary switch { "1" => NoDiaryMode.Internal, "3" => NoDiaryMode.NoCredit, _ => NoDiaryMode.Skip };
+if (Value("--vat") is { } vat)
+    settings.VatLines = vat == "total" ? VatLines.PerDealType : VatLines.PerAccount;
 
 try
 {
-    var options = ConverterOptions.Default;
+    var options = new ConverterOptions(settings);
     var batch = AiReader.Read(source);
     new DocumentProcessor(options).Process(batch);
     var rows = OperationRows.Build(batch, options);

@@ -44,12 +44,18 @@ internal sealed partial class WorkView
         });
         _fieldOfColumn[_documents.Columns.Count - 1] = DocField.AccountingDate;
         Field(DocField.PartnerName, IsPurchase ? "Доставчик" : "Клиент", 190, tip: "D · Партньор");
-        Field(DocField.Eik, "ЕИК", 92, tip: "E · Булстат/ЕИК");
+        Field(DocField.Eik, "ЕИК", HasVat ? 92 : 132, tip: "E · Булстат/ЕИК. Петнадесет деветки – няма номер.");
         Field(DocField.VatNumber, "ДДС №", 108, tip: "F · ДДС номер");
 
-        Money("Основа", d => d.TotalBase, "Данъчна основа, както ще се запише");
-        Money("ДДС", d => d.TotalVat, "ДДС, както ще се запише");
-        Money("Общо", d => d.TotalGross, "Общо по документа");
+        if (HasVat)
+        {
+            Money("Основа", d => d.TotalBase, "Данъчна основа, както ще се запише");
+            Money("ДДС", d => d.TotalVat, "ДДС, както ще се запише");
+        }
+
+        Money("Общо", d => d.TotalGross, HasVat ? "Общо по документа" : "Сумата в евро, както ще се запише");
+        if (!HasVat)
+            _documents.AddColumn(new() { Header = "По фактура", Width = 116, Right = true, Get = InvoiceAmount, Tip = "Сумата във валутата на фактурата" });
         _dealColumn = _documents.AddColumn(new()
         {
             Header = "Вид", Width = 62, Center = true, Tip = "N · Вид сделка. Променя се в редовете на документа или от лентата „Задай“.",
@@ -81,7 +87,7 @@ internal sealed partial class WorkView
 
         _documents.Columns[3].Frozen = true;
         _documents.StyleCell = StyleDocument;
-        _documents.Edited += DocumentsEdited;
+        _documents.Edited += Edited;
         _documents.SortRequested += RefreshDocuments;
         _documents.CurrentCellChanged += (_, _) => RefreshDetails();
         _documents.SelectionChanged += (_, _) => RefreshBulk();
@@ -101,6 +107,9 @@ internal sealed partial class WorkView
 
     private void Money(string header, Func<OperationDocument, decimal> value, string tip) =>
         _documents.AddColumn(new() { Header = header, Width = 88, Right = true, Tip = tip, Get = d => Fmt.Money(value(d)), SortKey = d => value(d) });
+
+    private static string InvoiceAmount(OperationDocument doc) => string.Join("; ", doc.Lines.GroupBy(l => l.InvoiceCurrency)
+        .Select(g => $"{Fmt.Money(g.Sum(l => l.InvoiceTotal))} {g.Key}"));
 
     private static IComparable NumberKey(string index) =>
         decimal.TryParse(index, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal n) ? n : decimal.MaxValue;
@@ -266,7 +275,7 @@ internal sealed partial class WorkView
             if (!ok && !errors.Contains(error)) errors.Add(error);
         }
 
-        DocumentsEdited(chosen);
+        Edited(chosen);
         if (errors.Count > 0) Dialogs.Warning(this, "Стойността не е приета", string.Join("\n", errors));
     }
 
@@ -274,7 +283,7 @@ internal sealed partial class WorkView
     {
         var chosen = _documents.SelectedItems();
         foreach (var doc in chosen) doc.Export = export;
-        if (chosen.Count > 0) DocumentsEdited(chosen);
+        if (chosen.Count > 0) Edited(chosen);
     }
 
     private void BulkRevert()
@@ -285,7 +294,7 @@ internal sealed partial class WorkView
                 "Върни от файла", "Отказ", warning: true))
             return;
         foreach (var doc in chosen) doc.Revert();
-        DocumentsEdited(chosen);
+        Edited(chosen);
     }
 
     private void RefreshDocuments() => _documents.SetRows(Batch.Documents.Where(Matches));

@@ -44,7 +44,7 @@ public static class OperationRows
         string accounts = string.Join(';', doc.Segments.Select(s => s.Account));
 
         row.Cells[L.Amounts] = string.Join(';', doc.Segments.Select(s => Amount(s.Amount)));
-        row.Cells[L.Accounts] = doc.Kind == OperationKind.Purchase
+        row.Cells[L.Accounts] = doc.Kind.IsPurchaseSide()
             ? accounts + "-" + doc.CounterAccountOut     // many debits – one credit
             : doc.CounterAccountOut + "-" + accounts;    // one debit – many credits
         row.Cells[L.Number] = doc.Number;
@@ -59,7 +59,7 @@ public static class OperationRows
     // so the payment of a credit note is the same label with a minus.
     private static OperationRow CashRow(OperationDocument doc)
     {
-        bool purchase = doc.Kind == OperationKind.Purchase;
+        bool purchase = doc.Kind.IsPurchaseSide();
         string type = purchase ? DocumentTypes.CashPayment : DocumentTypes.CashReceipt;
 
         var row = NewRow(doc, isCashRow: true);
@@ -96,7 +96,7 @@ public static class OperationRows
 
     private static string ViesCell(OperationDocument doc)
     {
-        if (doc.Kind == OperationKind.Purchase) return "";
+        if (doc.Kind.IsPurchaseSide()) return "";
         if (doc.ViesOverride is { } chosen) return Number(chosen);
         return Sequence(doc.Segments.Select(s => s.Vies), singleWhenEqual: true);
     }

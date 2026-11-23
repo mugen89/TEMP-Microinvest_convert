@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using MicroinvestConvert.App.Forms.Checks;
 using MicroinvestConvert.App.Ui;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
@@ -10,7 +11,7 @@ using MicroinvestConvert.Core.Source;
 namespace MicroinvestConvert.App.Forms;
 
 /// <summary>The opened file: its documents, what is in each of them, and what will be written.</summary>
-internal sealed partial class WorkView : AppView
+internal sealed partial class WorkView : AppView, ICheckHost
 {
     private enum Filter
     {
@@ -34,23 +35,29 @@ internal sealed partial class WorkView : AppView
     private readonly Palette _palette;
     private DocumentProcessor _processor;
     private bool _editsSinceSave;
+    private ChecksForm? _checks;
 
     public OperationBatch Batch { get; }
 
     /// <summary>Corrections that are not in a written file yet.</summary>
     public bool HasUnsavedEdits => _editsSinceSave;
 
-    public event Action? BackRequested;
-    public event Action? OpenRequested;
+    /// <summary>After anything was calculated again, corrected or written.</summary>
+    public event Action? Changed;
 
-    private ConverterOptions Options => _processor.Options;
-    private bool IsPurchase => Batch.Kind == OperationKind.Purchase;
+    public ConverterOptions Options => _processor.Options;
+    AppState ICheckHost.App => _app;
+
+    /// <summary>Purchases, at home and from abroad: many debits against one supplier.</summary>
+    private bool IsPurchase => Batch.Kind.IsPurchaseSide();
+    private bool HasVat => Batch.Kind != OperationKind.Foreign;
 
     // ----- controls -----
 
     private readonly CheckBox _dateRule = Make.Check("Сч. дата = дата на документа");
-    private readonly FlatButton _vatCheck = new("Проверка на ДДС");
-    private readonly FlatButton _accounts = new("Сметки…");
+    private readonly FlatButton _allChecks = new("Проверки");
+    private readonly FlatButton _vatCheck = new("ДДС");
+    private readonly FlatButton _accounts = new("Сметки");
     private readonly Label _exception = Make.Label("", Theme.WarningInk, Theme.Bold);
     private readonly ComboBox _filter = Make.Combo(200);
     private readonly TextBox _search = Make.TextBox(160, "Търсене");
@@ -75,82 +82,52 @@ internal sealed partial class WorkView : AppView
         BuildDetails();
         BuildPreview();
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.Controls.Add(BuildTitle(), 0, 0);
-        root.Controls.Add(BuildToolbar(), 0, 1);
-        root.Controls.Add(BuildTabs(), 0, 2);
-        root.Controls.Add(BuildFooter(), 0, 3);
+        root.Controls.Add(BuildToolbar(), 0, 0);
+        root.Controls.Add(BuildTabs(), 0, 1);
+        root.Controls.Add(BuildFooter(), 0, 2);
         Controls.Add(root);
 
         RefreshAll();
+        app.SettingsChanged += SettingsChanged;
         EndLayout();
     }
 
-    // ----- title, toolbar, footer -----
-
-    private Control BuildTitle()
-    {
-        string kind = IsPurchase ? "Покупки" : "Продажби";
-        string client = Batch.ClientName.Length > 0 ? Batch.ClientName : "Фирма без име";
-        if (Batch.ClientEik.Length > 0) client += $" ({Batch.ClientEik})";
-
-        var back = new FlatButton("← Начало", ButtonLook.Quiet);
-        back.Use(_palette);
-        back.Click += (_, _) => BackRequested?.Invoke();
-        var open = new FlatButton("Отвори друг файл…", ButtonLook.Quiet);
-        open.Use(_palette);
-        open.Click += (_, _) => OpenRequested?.Invoke();
-
-        var title = Make.Label($"{kind}  ·  {client}", _palette.AccentDark, Theme.Heading);
-        title.Margin = new Padding(6, 7, 3, 3);
-        var file = Make.Label($"{Path.GetFileName(Batch.SourcePath)}  ·  {Batch.LayoutName}", Theme.Muted, Theme.Small);
-        file.Margin = new Padding(8, 9, 3, 3);
-
-        var bar = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4, Margin = Padding.Empty,
-            Padding = new Padding(8, 3, 8, 3), BackColor = _palette.Soft,
-        };
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.Controls.Add(back, 0, 0);
-        bar.Controls.Add(title, 1, 0);
-        bar.Controls.Add(file, 2, 0);
-        bar.Controls.Add(open, 3, 0);
-        return bar;
-    }
+    // ----- toolbar, footer -----
 
     private Control BuildToolbar()
     {
         _dateRule.Checked = _app.Settings.General.AccountingDateEqualsDocumentDate;
         _dateRule.CheckedChanged += (_, _) =>
         {
+            if (_app.Settings.General.AccountingDateEqualsDocumentDate == _dateRule.Checked) return;
             _app.Settings.General.AccountingDateEqualsDocumentDate = _dateRule.Checked;
             _app.Save();
-            Reprocess();
+            _app.RaiseSettingsChanged();
         };
         _tips.SetToolTip(_dateRule,
             "Изключено: счетоводната дата (кол. C) е първият ден на данъчния период, но не преди датата на документа.\n" +
             "Включено: винаги е датата на документа. Месецът за експорт (кол. P) е равен на нея.");
 
+        _allChecks.Use(_palette);
+        _allChecks.Click += (_, _) => ShowChecks();
+        _tips.SetToolTip(_allChecks, "Отделен прозорец: всяка проверка, какво е намерила и къде се поправя.");
         _vatCheck.Use(_palette);
-        _vatCheck.Click += (_, _) => ShowVatCheck();
+        _vatCheck.Click += (_, _) => ShowChecks(VatPage.PageTitle);
+        _vatCheck.Visible = HasVat;
         _accounts.Use(_palette);
-        _accounts.Click += (_, _) => ShowAccounts();
+        _accounts.Click += (_, _) => ShowChecks(AccountsPage.PageTitle);
 
         _filter.Items.AddRange(Filters.Select(f => (object)f.Label).ToArray());
         _filter.SelectedIndex = 0;
         _filter.SelectedIndexChanged += (_, _) => RefreshDocuments();
         _search.TextChanged += (_, _) => RefreshDocuments();
 
-        var left = Make.Flow(_dateRule, Make.Gap(10), _vatCheck, _accounts, _exception);
+        var left = Make.Flow(_dateRule, Make.Gap(10), _allChecks, _vatCheck, _accounts, _exception);
         var right = Make.Flow(_filter, _search);
 
         var bar = new TableLayoutPanel
@@ -188,8 +165,8 @@ internal sealed partial class WorkView : AppView
             _app.Settings.OpenAfterSave = _openAfter.Checked;
             _app.Save();
         };
-        _openAfter.Margin = new Padding(3, 10, 10, 3);
-        foreach (var label in new[] { _counts, _errorCount, _warningCount, _totals }) label.Margin = new Padding(3, 9, 14, 3);
+        _openAfter.Margin = new Padding(3, 10, 8, 3);
+        foreach (var label in new[] { _counts, _errorCount, _warningCount, _totals }) label.Margin = new Padding(3, 9, 8, 3);
 
         var bar = new TableLayoutPanel
         {
@@ -212,28 +189,34 @@ internal sealed partial class WorkView : AppView
 
     // ----- recalculation and refresh -----
 
-    /// <summary>After the settings window.</summary>
-    public void SettingsChanged()
+    // Changed in any window: the settings, „Проверки", the same box of another module.
+    private void SettingsChanged()
     {
         _dateRule.Checked = _app.Settings.General.AccountingDateEqualsDocumentDate;
-        Reprocess();
-    }
-
-    private void Reprocess()
-    {
+        _openAfter.Checked = _app.Settings.OpenAfterSave;
         _processor = new DocumentProcessor(_app.Settings.OptionsFor(Batch.ClientEik));
         _processor.Process(Batch);
         RefreshAll();
     }
 
-    private void DocumentsEdited(IReadOnlyList<OperationDocument> documents)
+    void ICheckHost.SettingsChanged() => _app.RaiseSettingsChanged();
+
+    /// <summary>Documents were corrected, here or in „Проверки".</summary>
+    public void Edited(IReadOnlyList<OperationDocument> documents)
     {
-        foreach (var doc in documents) _processor.Process(Batch, doc);
         _editsSinceSave = true;
-        _documents.Invalidate();
+        Ticked(documents);
+    }
+
+    /// <summary>The same without a correction to save.</summary>
+    public void Ticked(IReadOnlyList<OperationDocument> documents)
+    {
+        _processor.Process(Batch, documents);
+        _documents.Invalidate();   // the rows stay where they are, also when they leave the filter
         RefreshDetails();
         RefreshSummary();
         if (_tabs.SelectedIndex == 1) RefreshPreview();
+        Changed?.Invoke();
     }
 
     private void RefreshAll()
@@ -242,6 +225,7 @@ internal sealed partial class WorkView : AppView
         RefreshDetails();
         RefreshSummary();
         if (_tabs.SelectedIndex == 1) RefreshPreview();
+        Changed?.Invoke();
     }
 
     private void RefreshSummary()
@@ -257,19 +241,24 @@ internal sealed partial class WorkView : AppView
         _errorCount.Visible = errors > 0;
         _warningCount.Text = warnings > 0 ? $"⚠ за преглед: {warnings}" : "";
         _warningCount.Visible = warnings > 0;
-        _totals.Text = $"основа {Fmt.Money(written.Sum(d => d.TotalBase))}    ДДС {Fmt.Money(written.Sum(d => d.TotalVat))}" +
-                       $"    общо {Fmt.Money(written.Sum(d => d.TotalGross))}";
+        _totals.Text = (HasVat
+                           ? $"основа {Fmt.Money(written.Sum(d => d.TotalBase))}   ДДС {Fmt.Money(written.Sum(d => d.TotalVat))}   "
+                           : "") + $"общо {Fmt.Money(written.Sum(d => d.TotalGross))}";
         _save.Enabled = written.Count > 0;
 
-        int vat = VatCheckForm.OpenQuestions(Batch);
-        _vatCheck.Text = vat > 0 ? $"Проверка на ДДС ({vat})" : "Проверка на ДДС";
+        int open = docs.Count(d => d is { Export: true, SkippedBySetting: false } && d.Issues.Any(i => i.IsOpen));
+        _allChecks.Text = open > 0 ? $"Проверки ({open})" : "Проверки";
+        _allChecks.Font = open > 0 ? Theme.Bold : Theme.Base;
+
+        int vat = VatPage.OpenQuestions(Batch);
+        _vatCheck.Text = vat > 0 ? $"ДДС ({vat})" : "ДДС";
         _vatCheck.Font = vat > 0 ? Theme.Bold : Theme.Base;
 
         // The VAT accounts are never shown — unless they are not the usual ones.
         string account = IsPurchase ? Options.PurchaseVatAccount : Options.SaleVatAccount;
         string usual = IsPurchase ? ConverterSettings.DefaultPurchaseVatAccount : ConverterSettings.DefaultSaleVatAccount;
         _exception.Text = account != usual ? $"ДДС сметка: {account}" : "";
-        _exception.Visible = account != usual;
+        _exception.Visible = account != usual && HasVat;
     }
 
     private bool Matches(OperationDocument doc)
@@ -292,24 +281,39 @@ internal sealed partial class WorkView : AppView
             .Any(t => t.Contains(needle, StringComparison.CurrentCultureIgnoreCase));
     }
 
-    // ----- the other windows -----
+    // ----- „Проверки" -----
 
-    private void ShowVatCheck()
+    private void ShowChecks(string page = "")
     {
-        using var form = new VatCheckForm(_app, Batch, () =>
+        EndEdits();
+        if (_checks == null)
         {
-            _processor = new DocumentProcessor(_app.Settings.OptionsFor(Batch.ClientEik));
-            _processor.Process(Batch);
-        });
-        form.ShowDialog(this);
-        if (form.EditsMade) _editsSinceSave = true;
-        RefreshAll();
+            _checks = new ChecksForm(this);
+            _checks.FormClosed += (_, _) => _checks = null;
+            if (page.Length > 0) _checks.ShowPage(page);
+            _checks.Show(FindForm());
+            return;
+        }
+
+        if (page.Length > 0) _checks.ShowPage(page);
+        _checks.Activate();
     }
 
-    private void ShowAccounts()
+    public void CloseChecks() => _checks?.Close();
+
+    /// <summary>Goes to a document, whatever the filter hides.</summary>
+    public void Reveal(OperationDocument document)
     {
-        using var form = new AccountsForm(_app, Batch);
-        if (form.ShowDialog(this) == DialogResult.OK) Reprocess();
+        _tabs.SelectedIndex = 0;
+        if (!_documents.GoTo(document))
+        {
+            _search.Clear();
+            _filter.SelectedIndex = 0;
+            _documents.GoTo(document);
+        }
+
+        FindForm()?.Activate();
+        _documents.Focus();
     }
 
     // ----- writing the file -----
@@ -358,12 +362,13 @@ internal sealed partial class WorkView : AppView
         }
 
         _editsSinceSave = false;
+        Changed?.Invoke();
         ReportSaved(path, written.Count, rows.Count);
     }
 
     private bool ConfirmOpenQuestions(List<OperationDocument> written)
     {
-        int four = written.Count(d => d.Issues.Any(i => i.Code == IssueCode.VatUnresolved));
+        int four = written.Count(d => d.Issues.Any(i => i is { Code: IssueCode.VatUnresolved, Reviewed: false }));
         int other = written.Count(d => d.HasWarnings) - four;
         if (four == 0 && other == 0) return true;
 
@@ -372,7 +377,9 @@ internal sealed partial class WorkView : AppView
             text += $"• {Fmt.Documents(four)} с вид сделка 4, защото ДДС не отговаря на 20% или 9%.\n";
         if (other > 0)
             text += $"• {Fmt.Documents(other)} с други предупреждения.\n";
-        return Dialogs.Ask(this, "Има документи за преглед", text + "\nДа запиша ли файла така?", "Запиши", "Прегледай", warning: true);
+        if (Dialogs.Ask(this, "Има документи за преглед", text + "\nДа запиша ли файла така?", "Запиши", "Прегледай", warning: true)) return true;
+        ShowChecks();
+        return false;
     }
 
     private void ReportSaved(string path, int documents, int rows)
@@ -401,7 +408,13 @@ internal sealed partial class WorkView : AppView
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _tips.Dispose();
+        if (disposing)
+        {
+            _app.SettingsChanged -= SettingsChanged;
+            CloseChecks();
+            _tips.Dispose();
+        }
+
         base.Dispose(disposing);
     }
 }

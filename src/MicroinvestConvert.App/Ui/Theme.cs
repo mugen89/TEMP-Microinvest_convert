@@ -2,7 +2,7 @@ using MicroinvestConvert.Core.Model;
 
 namespace MicroinvestConvert.App.Ui;
 
-/// <summary>Colours of one kind of documents: green for purchases, blue for sales.</summary>
+/// <summary>Colours of one kind of documents: green for purchases, blue for sales, amber for foreign ones.</summary>
 internal sealed record Palette(Color Accent, Color AccentDark, Color Soft, Color SoftBorder, Color Header)
 {
     public static readonly Palette Purchases = new(
@@ -13,11 +13,20 @@ internal sealed record Palette(Color Accent, Color AccentDark, Color Soft, Color
         Color.FromArgb(28, 111, 184), Color.FromArgb(20, 84, 141), Color.FromArgb(230, 242, 252),
         Color.FromArgb(168, 205, 235), Color.FromArgb(214, 232, 247));
 
+    public static readonly Palette Foreign = new(
+        Color.FromArgb(178, 102, 12), Color.FromArgb(138, 78, 6), Color.FromArgb(253, 245, 230),
+        Color.FromArgb(234, 205, 158), Color.FromArgb(250, 234, 206));
+
     public static readonly Palette Neutral = new(
         Color.FromArgb(45, 90, 120), Color.FromArgb(33, 68, 92), Color.FromArgb(240, 244, 248),
         Color.FromArgb(205, 215, 225), Color.FromArgb(228, 235, 241));
 
-    public static Palette For(OperationKind kind) => kind == OperationKind.Purchase ? Purchases : Sales;
+    public static Palette For(OperationKind kind) => kind switch
+    {
+        OperationKind.Purchase => Purchases,
+        OperationKind.Sale => Sales,
+        _ => Foreign,
+    };
 }
 
 internal static class Theme

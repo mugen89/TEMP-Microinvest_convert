@@ -4,14 +4,16 @@ using MicroinvestConvert.Core.Nomenclature;
 using MicroinvestConvert.Core.Rules;
 using MicroinvestConvert.Core.Settings;
 
-namespace MicroinvestConvert.App.Forms;
+namespace MicroinvestConvert.App.Forms.Checks;
 
 /// <summary>
-/// „Проверка на ДДС": the VAT of every document against its rate, the rounding and the
-/// allowed difference, and the corrections.
+/// „ДДС": the VAT of every document against its rate, the rounding and the allowed difference,
+/// and the corrections.
 /// </summary>
-internal sealed class VatCheckForm : AppForm
+internal sealed class VatPage : CheckPage
 {
+    public const string PageTitle = "ДДС";
+
     private static readonly (VatRounding Value, string Label)[] Roundings =
     [
         (VatRounding.HalfUp, "Математическо (0,005 → 0,01)"),
@@ -19,25 +21,19 @@ internal sealed class VatCheckForm : AppForm
         (VatRounding.Truncate, "Отрязване (0,009 → 0,00)"),
     ];
 
-    private readonly AppState _app;
-    private readonly OperationBatch _batch;
-    private readonly Action _reprocess;
-    private readonly bool _purchase;
     private readonly Grid<VatGroup> _grid = new();
     private readonly ComboBox _rounding = Make.Combo(250);
     private readonly NumericUpDown _perDocument, _perLine;
     private readonly ComboBox _show = Make.Combo(190, "Само с разлика", "Всички");
     private readonly Label _summary = Make.Label("", font: Theme.Bold);
     private readonly List<Button> _actions = [];
+    private bool _refreshing;
 
-    /// <summary>A document was corrected here (not only looked at).</summary>
-    public bool EditsMade { get; private set; }
+    public override string Title => PageTitle;
+    public override int Open => OpenQuestions(Batch);
 
     /// <summary>How many VAT questions nobody has answered yet.</summary>
-    public static int OpenQuestions(OperationBatch batch) => batch.Documents
-        .Where(d => d.WillExport)
-        .SelectMany(d => d.VatGroups)
-        .Count(g => IsQuestion(g) && !IsDecided(g));
+    public static int OpenQuestions(OperationBatch batch) => batch.Documents.Where(d => d.WillExport).SelectMany(d => d.VatGroups).Count(IsOpen);
 
     private static bool IsQuestion(VatGroup g) =>
         g.Bucket != LedgerBucket.PurchasePartialCredit &&
@@ -45,27 +41,21 @@ internal sealed class VatCheckForm : AppForm
 
     private static bool IsDecided(VatGroup g) => g.Lines.All(l => l.DealTypeOverride != null);
 
-    public VatCheckForm(AppState app, OperationBatch batch, Action reprocess)
+    // Answered here, ticked off among all the checks, or not asked at all.
+    private static bool IsOpen(VatGroup g) => IsQuestion(g) && !IsDecided(g) && g.Document.Issues.Any(i =>
+        i.IsOpen && i.Code is IssueCode.VatUnresolved or IssueCode.VatZeroButDeclared or IssueCode.VatMismatch);
+
+    public VatPage(ICheckHost host) : base(host)
     {
-        _app = app;
-        _batch = batch;
-        _reprocess = reprocess;
-        _purchase = batch.Kind == OperationKind.Purchase;
-        var palette = Palette.For(batch.Kind);
-
-        Text = "Проверка на ДДС";
-        AsDialog(1230, 620, 1060, 440);
-
-        var general = app.Settings.General;
-        _perDocument = Make.Cents(general.TolerancePerDocument, 10m);
-        _perLine = Make.Cents(general.TolerancePerLine, 1m);
+        _perDocument = Make.Cents(0m, 10m);
+        _perLine = Make.Cents(0m, 1m);
         _rounding.Items.AddRange(Roundings.Select(r => (object)r.Label).ToArray());
-        _rounding.SelectedIndex = Array.FindIndex(Roundings, r => r.Value == general.Rounding);
         _show.SelectedIndex = 0;
+        ShowSettings();
 
-        _rounding.SelectedIndexChanged += (_, _) => SettingsChanged();
-        _perDocument.ValueChanged += (_, _) => SettingsChanged();
-        _perLine.ValueChanged += (_, _) => SettingsChanged();
+        _rounding.SelectedIndexChanged += (_, _) => SettingsEdited();
+        _perDocument.ValueChanged += (_, _) => SettingsEdited();
+        _perLine.ValueChanged += (_, _) => SettingsEdited();
         _show.SelectedIndexChanged += (_, _) => RefreshRows();
 
         var options = Make.Flow(
@@ -73,35 +63,20 @@ internal sealed class VatCheckForm : AppForm
             Make.Label("Допустима разлика за документ:"), _perDocument, Make.Gap(6),
             Make.Label("за отделен ред:"), _perLine, Make.Gap(10),
             Make.Label("Показвай:"), _show);
-        options.Padding = new Padding(10, 6, 10, 4);
+        options.Padding = new Padding(6, 6, 6, 2);
 
-        string rule = _purchase
+        var note = Note(Batch.Kind == OperationKind.Purchase
             ? "ДДС, който е 20% или 9% от основата (с допустимата разлика), е вид сделка 2. Без ДДС – 3. Когато не отговаря на никоя ставка – 4, докато не решите друго."
-            : "Видът сделка идва от колоната на дневника. Тук се сравнява дали ДДС отговаря на 20% и 9%.";
-        var note = Make.Text(rule, Theme.Muted, 1120);
-        note.Margin = new Padding(13, 0, 10, 4);
+            : "Видът сделка идва от колоната на дневника. Тук се сравнява дали ДДС отговаря на 20% и 9%.");
 
-        BuildGrid(palette);
-
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.Controls.Add(options, 0, 0);
-        root.Controls.Add(note, 0, 1);
-        root.Controls.Add(_grid, 0, 2);
-        root.Controls.Add(BuildActions(palette), 0, 3);
-        Controls.Add(root);
-
-        RefreshRows();
+        BuildGrid();
+        Controls.Add(Rows(2, options, note, _grid, BuildActions()));
         EndLayout();
     }
 
-    private void BuildGrid(Palette palette)
+    private void BuildGrid()
     {
-        _grid.Use(palette);
+        _grid.Use(Palette);
         _grid.ReadOnly = true;
         _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _grid.SetHeights(25, 30);
@@ -122,10 +97,11 @@ internal sealed class VatCheckForm : AppForm
         _grid.StyleCell = (g, _, style) =>
         {
             if (IsDecided(g)) style.ForeColor = Theme.EditedInk;
-            else if (IsQuestion(g)) style.BackColor = Theme.WarningBack;
+            else if (IsOpen(g)) style.BackColor = Theme.WarningBack;
         };
         _grid.SelectionChanged += (_, _) => RefreshActions();
         _grid.SortRequested += RefreshRows;
+        _grid.RowActivated += g => Host.Reveal(g.Document);
     }
 
     private void Money(string header, Func<VatGroup, decimal> value) =>
@@ -146,21 +122,18 @@ internal sealed class VatCheckForm : AppForm
         };
     }
 
-    private Control BuildActions(Palette palette)
+    private Control BuildActions()
     {
         var buttons = new List<Control>();
 
         void Add(string text, string tip, Func<VatGroup, bool> act)
         {
-            var button = new FlatButton(text);
-            button.Use(palette);
-            button.Click += (_, _) => Act(act);
-            new ToolTip { AutoPopDelay = 15000 }.SetToolTip(button, tip);
+            var button = MakeButton(text, () => Act(act), tip);
             _actions.Add(button);
             buttons.Add(button);
         }
 
-        if (_purchase)
+        if (Batch.Kind == OperationKind.Purchase)
         {
             Add("Приеми – вид 2", "Сумите остават, видът сделка е 2 (пълен данъчен кредит).",
                 g => VatCorrections.SetDeal(g, DealTypes.PurchaseFullCredit));
@@ -183,63 +156,56 @@ internal sealed class VatCheckForm : AppForm
             return true;
         });
 
-        var close = new FlatButton("Затвори", ButtonLook.Primary);
-        close.Use(palette);
-        close.Click += (_, _) => Close();
-        CancelButton = close;
-
-        var left = Make.Flow([.. buttons]);
         _summary.Margin = new Padding(6, 9, 12, 3);
-
-        var bar = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3, Padding = new Padding(8, 6, 8, 8), BackColor = Theme.Surface };
+        var bar = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new Padding(5, 4, 5, 4) };
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.Controls.Add(left, 0, 0);
+        bar.Controls.Add(Make.Flow([.. buttons]), 0, 0);
         bar.Controls.Add(_summary, 1, 0);
-        bar.Controls.Add(close, 2, 0);
         return bar;
     }
-
-    // ----- actions -----
 
     private void Act(Func<VatGroup, bool> act)
     {
         var chosen = _grid.SelectedItems();
         if (chosen.Count == 0) return;
 
-        int done = chosen.Count(act);
-        if (done > 0)
-        {
-            EditsMade = true;
-            _reprocess();
-            RefreshRows();
-        }
-
-        if (done < chosen.Count)
-            Dialogs.Info(this, "Не е приложимо за всички избрани",
-                $"Приложено за {done} от {chosen.Count}. При останалите сумите не позволяват това действие.");
+        var done = chosen.Where(act).ToList();
+        if (done.Count > 0) Host.Edited(done.Select(g => g.Document).Distinct().ToList());
+        if (done.Count < chosen.Count)
+            Dialogs.Info(FindForm(), "Не е приложимо за всички избрани",
+                $"Приложено за {done.Count} от {chosen.Count}. При останалите сумите не позволяват това действие.");
     }
 
-    // ----- refresh -----
-
-    private void SettingsChanged()
+    // They may have been changed in the window of another module.
+    private void ShowSettings()
     {
-        var general = _app.Settings.General;
+        var general = Host.App.Settings.General;
+        _refreshing = true;
+        _rounding.SelectedIndex = Array.FindIndex(Roundings, r => r.Value == general.Rounding);
+        _perDocument.Value = general.TolerancePerDocument;
+        _perLine.Value = general.TolerancePerLine;
+        _refreshing = false;
+    }
+
+    private void SettingsEdited()
+    {
+        if (_refreshing) return;
+        var general = Host.App.Settings.General;
         general.Rounding = Roundings[Math.Max(0, _rounding.SelectedIndex)].Value;
         general.TolerancePerDocument = _perDocument.Value;
         general.TolerancePerLine = _perLine.Value;
-        _app.Save();
-        _reprocess();
-        RefreshRows();
+        Host.App.Save();
+        Host.SettingsChanged();
     }
 
-    private void RefreshRows()
+    public override void RefreshRows()
     {
-        var groups = _batch.Documents.SelectMany(d => d.VatGroups).ToList();
+        ShowSettings();
+        var groups = Batch.Documents.SelectMany(d => d.VatGroups).ToList();
         _grid.SetRows(_show.SelectedIndex == 1 ? groups : groups.Where(g => g.NeedsLook || IsDecided(g)));
 
-        int questions = OpenQuestions(_batch);
+        int questions = OpenQuestions(Batch);
         int cents = groups.Count(g => g.Status == VatStatus.WithinTolerance && !IsDecided(g));
         _summary.Text = questions == 0
             ? cents == 0 ? "Няма разлики" : $"За решаване: няма   ·   в допустимата разлика: {cents}"

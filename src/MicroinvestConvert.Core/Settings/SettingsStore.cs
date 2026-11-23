@@ -7,7 +7,10 @@ namespace MicroinvestConvert.Core.Settings;
 /// <summary>Everything the program remembers between two starts.</summary>
 public sealed class SettingsFile
 {
-    public int Version { get; set; } = 1;
+    /// <summary>2 = since 1.1.0, when two defaults changed.</summary>
+    public const int CurrentVersion = 2;
+
+    public int Version { get; set; } = CurrentVersion;
     public ConverterSettings General { get; set; } = new();
 
     /// <summary>Exceptions per client, by ЕИК.</summary>
@@ -114,8 +117,17 @@ public sealed class SettingsStore(string path)
         g.SaleVatAccount = Or(g.SaleVatAccount, ConverterSettings.DefaultSaleVatAccount);
         g.DefaultCashAccount ??= "";
         g.Accounts = new Dictionary<string, string>(g.Accounts ?? [], StringComparer.OrdinalIgnoreCase);
+        g.ChecksOff = (g.ChecksOff ?? []).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
         g.TolerancePerLine = Math.Clamp(g.TolerancePerLine, 0m, 1m);
         g.TolerancePerDocument = Math.Clamp(g.TolerancePerDocument, 0m, 10m);
+
+        // 1.0 wrote every setting, also the untouched ones: what is still the old default moves on.
+        if (file.Version < SettingsFile.CurrentVersion)
+        {
+            if (g.VatLines == VatLines.PerDealType) g.VatLines = VatLines.PerAccount;
+            if (g.NoDiary == NoDiaryMode.Internal) g.NoDiary = NoDiaryMode.NoCredit;
+            file.Version = SettingsFile.CurrentVersion;
+        }
 
         var clients = new Dictionary<string, ClientSettings>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, client) in file.Clients ?? [])

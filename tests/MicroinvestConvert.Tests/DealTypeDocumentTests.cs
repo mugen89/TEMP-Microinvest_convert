@@ -134,6 +134,19 @@ public class DealTypeDocumentTests
             .Sale(1d, "1", 100, 9, ("K", "703"), ("AD", 100d), ("AE", 9d))));
         Assert.Equal(Written("ВОД 470,00"), Built(new TestSheet(Layout.Sales).Sale(1d, "1", 470, 0, ("K", "702"), ("AF", 470d))));
         Assert.Equal(Written("услуга към ЕС 130,00"), Built(new TestSheet(Layout.Sales).Sale(1d, "1", 130, 0, ("AI", 130d))));
+
+        Assert.Equal(Written("фактура от чужбина, 100,00 USD"), Built(new TestSheet(Layout.Foreign).Invoice(1d, "1", 100, "USD", 86.27m)));
+        Assert.Equal(Written("кредитно известие от чужбина"), Built(new TestSheet(Layout.Foreign)
+            .Invoice(1d, "1", -50, "EUR", -50, ("B", "КИ"), ("C", 3d))));
+    }
+
+    [Fact]
+    public void A_foreign_supplier_outside_the_ledger_is_written_and_warned_about()
+    {
+        Assert.StartsWith("вид 3 с предупреждение", Row("П17")[2]);
+        var doc = new TestSheet(Layout.Purchases)
+            .Purchase(1d, "1", 100, 0, ("AC", "-"), ("AD", "-"), ("AG", "ДА"), ("J", "DE123456789")).Single();
+        Assert.Equal(("3", true, true), (doc.Deals(), doc.WillExport, doc.HasWarnings));
     }
 
     [Fact]

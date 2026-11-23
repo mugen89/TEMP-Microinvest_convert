@@ -141,7 +141,7 @@ internal sealed class SettingsForm : AppForm
             table,
             _cashRows,
             Make.Flow(Make.Label("Каса, когато във файла няма:"), _cashAccount),
-            Make.Text("Закръглянето на ДДС и допустимата разлика са в прозореца „Проверка на ДДС“.", Theme.Muted, 620));
+            Make.Text("Закръглянето на ДДС и допустимата разлика са в „Проверки → ДДС“. Кои проверки са включени – в „Проверки → Всички проверки“.", Theme.Muted, 620));
     }
 
     private Control BuildAccounts()
@@ -175,7 +175,7 @@ internal sealed class SettingsForm : AppForm
         page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         page.Controls.Add(Make.Text("Сметките се записват, както са във файла. Тук са запомнените съответствия за тези, " +
-                                    "които в Делта Pro са с друг номер (добавят се от бутона „Сметки…“ в отворен файл).", Theme.Muted, 620), 0, 0);
+                                    "които в Делта Pro са с друг номер (добавят се от „Проверки → Сметки“ в отворен файл).", Theme.Muted, 620), 0, 0);
         page.Controls.Add(_mappings, 0, 1);
         page.Controls.Add(remove, 0, 2);
         return page;

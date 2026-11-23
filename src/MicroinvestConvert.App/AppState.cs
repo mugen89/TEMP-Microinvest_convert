@@ -12,6 +12,11 @@ internal sealed class AppState
     /// <summary>Told once, when the settings could not be read.</summary>
     public string LoadProblem => _store.LoadProblem;
 
+    /// <summary>The settings were changed in some window: every open file is calculated again.</summary>
+    public event Action? SettingsChanged;
+
+    public void RaiseSettingsChanged() => SettingsChanged?.Invoke();
+
     public AppState(string settingsPath)
     {
         _store = new SettingsStore(settingsPath);

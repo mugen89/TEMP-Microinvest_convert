@@ -43,6 +43,19 @@ public readonly record struct PartnerIdentity(string Eik, string VatNumber)
     /// <summary>A VAT number of another member state — what VIES needs.</summary>
     public bool IsOtherEuMember => IsForeign && EuPrefixes.Contains(Prefix);
 
+    /// <summary>VAT number BG…, or an ЕИК with the right check digit.</summary>
+    public bool IsBulgarian => Prefix == "BG" ||
+        (VatNumber.Length == 0 && Eik.Length is 9 or 13 && !IsPlaceholder(Eik) && HasValidEikCheckDigit(Eik[..9]));
+
+    /// <summary>„Няма номер" – nines only, as the VAT ledgers want it.</summary>
+    public static bool IsPlaceholder(string eik) => eik.Length >= 9 && eik.All(c => c == '9');
+
+    /// <summary>
+    /// Digits that cannot be a Bulgarian number by their count: an ЕИК has 9 or 13, an ЕГН 10.
+    /// </summary>
+    public static bool HasPossibleLength(string eik) =>
+        eik.Length == 0 || IsPlaceholder(eik) || eik.Length is 9 or 10 or 13 || !eik.All(char.IsAsciiDigit);
+
     /// <summary>
     /// The check digit of a 9-digit ЕИК. Other lengths (ЕГН, ЕИК на клон, placeholders) are
     /// not judged here.

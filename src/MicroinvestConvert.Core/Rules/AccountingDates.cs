@@ -27,15 +27,17 @@ public static class AccountingDates
 /// <summary>The currency the books are kept in.</summary>
 public static class BookCurrency
 {
+    public const string Euro = "EUR";
+
     private static readonly DateTime EuroAdoption = new(2026, 1, 1);
 
     /// <summary>BGN until 31.12.2025, EUR from 01.01.2026.</summary>
-    public static string On(DateTime date) => date < EuroAdoption ? "BGN" : "EUR";
+    public static string On(DateTime date) => date < EuroAdoption ? "BGN" : Euro;
 
     public static string Normalise(string? currency) => (currency ?? "").Trim().ToUpperInvariant() switch
     {
         "" => "",
-        "EUR" or "EURO" or "ЕВРО" or "€" => "EUR",
+        "EUR" or "EURO" or "ЕВРО" or "€" => Euro,
         "BGN" or "ЛВ" or "ЛВ." or "ЛЕВ" or "ЛЕВА" => "BGN",
         var other => other,
     };

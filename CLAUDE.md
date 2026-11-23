@@ -5,8 +5,8 @@ Guidance for Claude Code when working in this folder (its own git repository).
 ## What this is
 
 A separate Windows program (C#, .NET 9, WinForms) that converts AI Accounting
-exports („Покупки", „Продажби") into an import workbook for **Microinvest
-Делта Pro**. It is polished here, in iterations with an accountant; once the
+exports („Покупки", „Продажби", „Чуждестранни") into an import workbook for
+**Microinvest Делта Pro**. It is polished here, in iterations with an accountant; once the
 conversion is approved the engine moves into the owner's web edition. Keep
 `MicroinvestConvert.Core` free of UI and Windows code so it can be copied there
 unchanged.
@@ -23,17 +23,33 @@ unchanged.
 - **The output is BIFF8 `.xls`, every cell of „Операции" is text.** Делта Pro
   does not read `.xlsx`. Amounts have a decimal dot; dates are `yyyy-MM-dd`.
 - **Columns Q–AA stay empty** until the protocols are done; VIES (O) is empty
-  for purchases; P = C. All three are the owner's decisions.
+  for purchases; P = C. All three are the owner's decisions. Foreign invoices
+  too: the owner chose „invoice only" (2026-11-23).
 - **Columns of the source are matched by position, never by header text** — the
   headers drift in the right part of the sales export. Two sales layouts exist
-  (47 columns; 44 until July 2026); `AiFile` recognises them.
+  (47 columns; 44 until July 2026); `AiFile` recognises them. The foreign export
+  is the purchases one with K and AI inserted: it is accepted only when both
+  headers are there, never read with the ordinary map.
 - **Accounts are written as the file has them:** main account, „/", sub-account
   (4111 and 1 → 4111/1; 411/1 and 1 → 411/1/1). Digits are never split — the
   owner's decision. `AccountText` cleans only slashes and spaces that cannot mean
   anything else; whatever could mean two things is an error, not a guess.
-- **Purchases „без ДДС дневник" → deal type 1 is unconfirmed** (П4, В5, В20). The
-  owner keeps it for now; most of them are purchases from abroad whose VAT comes
-  with a protocol, which this version does not write.
+- **Purchases „без ДДС дневник" → deal type 3** (the owner's choice since 1.1.0;
+  it was 1). For a supplier from abroad that is a warning (`ForeignNoDiary`): with
+  a protocol the document would be in the ledger twice.
+- **VAT follows every account** (`VatLines.PerAccount`, the default since 1.1.0);
+  the VAT amounts of a deal type must add up to what they are as one amount —
+  `DocumentProcessor.RoundSegments`.
+- **A check = a code + an entry + a place that raises it:** `IssueCode`,
+  `CheckCatalog`, the rule. The severity comes from the catalogue. Settings keep
+  the switched-off ones by name, so an older version still reads a newer file.
+  The window „Проверки" lists a new check by itself; a new page is a class in
+  `App/Forms/Checks` and a line in `CheckPages`.
+- **One button on the taskbar:** only `MainForm` has `ShowInTaskbar`. Every other
+  window has an owner; `AppForm` hides and shows what it owns when the program is
+  minimised (Windows does that for one level only).
+- **Settings are shared by the open windows:** after changing one, save and call
+  `AppState.RaiseSettingsChanged()`.
 - One debit – many credits (sales) or many debits – one credit (purchases);
   never many to many. The `%` shorthand of `Model.xls` is not used.
 - **Deal type 4 is legally „частичен данъчен кредит".** The owner's rule also
@@ -51,10 +67,13 @@ unchanged.
 |---|---|
 | `Core/Source` | Excel reading (`WorkbookLoader`), recognition (`AiFile`), rows → documents (`AiReader`), column map (`AiColumns`) |
 | `Core/Model` | `OperationBatch` → `OperationDocument` → `LedgerLine` (one amount in one `LedgerBucket`); edits go through `TrySet` |
-| `Core/Rules` | `DocumentProcessor` (run again after every edit), `PurchaseRules`, `SaleRules`, `VatRates`, `VatCorrections`, accounts, dates, partners |
+| `Core/Rules` | `DocumentProcessor` (run again after every edit), `PurchaseRules`, `SaleRules`, `ForeignRules`, `VatRates`, `VatCorrections`, accounts, dates, partners |
 | `Core/Output` | `OperationRows` (the texts of A..AA), `DeltaWorkbook` (write + read back and compare) |
 | `Core/Settings` | general settings, exceptions per client (by ЕИК), JSON store |
-| `App/Forms` | `MainForm`, `StartView`, `WorkView` (3 files), `VatCheckForm`, `AccountsForm`, `SettingsForm`, `UpdateForm` |
+| `Core/Checks` | `CheckCatalog`: every check, its meaning, severity and the fields that answer it |
+| `App/Forms` | `MainForm` (start window, `IHub`), `ModuleCard`, `ModuleForm` (one window per module), `WorkView` (3 files), `SettingsForm`, `UpdateForm` |
+| `App/Forms/Checks` | `ChecksForm` and its pages; they talk to the opened file through `ICheckHost` |
+| `App/Ui` | `Grid<T>`, `FileDrop` (dropping files), `Controls`, `Theme` |
 | `App/Updates` | `UpdateService` (GitHub releases), `UpdateInstaller` (swap of the running .exe, kept versions) |
 
 A new input format only has to produce an `OperationBatch`.
@@ -64,7 +83,7 @@ A new input format only has to produce an `OperationBatch`.
 ```
 dotnet test
 dotnet run --project src/MicroinvestConvert.App
-dotnet run --project tools/MicroinvestConvert.Cli -- <file> --rows --issues [--out x.xls]
+dotnet run --project tools/MicroinvestConvert.Cli -- <file> --rows --issues [--out x.xls] [--no-diary 1|3|skip] [--vat total|account]
 dotnet publish src/MicroinvestConvert.App -p:PublishProfile=win-x64
 ```
 

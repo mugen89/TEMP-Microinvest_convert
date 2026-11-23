@@ -158,22 +158,15 @@ internal static class PurchaseRules
     private static void AddIssues(OperationDocument doc, List<VatGroup> groups, ConverterOptions options)
     {
         if (doc.Lines.Any(l => l.Bucket == LedgerBucket.PurchaseReverseCharge && l.DealTypeOverride == null))
-            doc.Issues.Add(new Issue(IssueSeverity.Error, IssueCode.ReverseCharge,
+            doc.Issues.Add(new Issue(IssueCode.ReverseCharge,
                 "Обратно начисляване по чл. 163а – изисква протокол (колони Q–AA), който ще бъде добавен в следваща версия. " +
                 "Документът не се записва, освен ако не зададете вид сделка на редовете му."));
 
         bool foreign = new PartnerIdentity(doc.Eik, doc.VatNumber).IsForeign;
-
-        if (doc.Lines.Any(l => l.Bucket == LedgerBucket.PurchaseNoDiary))
-            doc.Issues.Add(new Issue(IssueSeverity.Info, IssueCode.NoDiary, options.General.NoDiary switch
-            {
-                NoDiaryMode.Skip => "„Без ДДС дневник“ – не се записва (настройка).",
-                NoDiaryMode.NoCredit => "„Без ДДС дневник“ – вид сделка 3 (настройка).",
-                _ => "„Без ДДС дневник“ – вид сделка 1, не влиза в дневника.",
-            } + (foreign ? $" Доставчикът е чужд ({doc.VatNumber}): протоколът за самоначисляване на ДДС (кол. Q–AA) не се създава в тази версия." : "")));
+        AddNoDiaryIssues(doc, options, foreign);
 
         if (doc.Lines.Any(l => l.Bucket == LedgerBucket.PurchaseUnspecified))
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.Unspecified,
+            doc.Issues.Add(new Issue(IssueCode.Unspecified,
                 "Има сума без стойност в колоните за дневника (AB–AG) – видът сделка е определен само по сумите."));
 
         foreach (var group in groups)
@@ -184,9 +177,36 @@ internal static class PurchaseRules
         }
 
         if (foreign && doc.Lines.Any(l => l.Bucket != LedgerBucket.PurchaseNoDiary && l.DealTypeOverride == null))
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.ForeignSupplier,
+            doc.Issues.Add(new Issue(IssueCode.ForeignSupplier,
                 $"Доставчикът е чужд ({doc.VatNumber}). Обикновено такава доставка е с протокол – вид сделка 1 и колони Q–AA " +
                 "(следваща версия). Проверете вида сделка."));
+    }
+
+    private static void AddNoDiaryIssues(OperationDocument doc, ConverterOptions options, bool foreign)
+    {
+        var lines = doc.Lines.Where(l => l.Bucket == LedgerBucket.PurchaseNoDiary).ToList();
+        if (lines.Count == 0) return;
+
+        doc.Issues.Add(new Issue(IssueCode.NoDiary, options.General.NoDiary switch
+        {
+            NoDiaryMode.Skip => "„Без ДДС дневник“ – не се записва (настройка).",
+            NoDiaryMode.NoCredit => "„Без ДДС дневник“ – вид сделка 3, влиза в дневника, к. 9 (настройка).",
+            _ => "„Без ДДС дневник“ – вид сделка 1, не влиза в дневника (настройка)." +
+                 (foreign ? $" Доставчикът е чужд ({doc.VatNumber}): протоколът за самоначисляване на ДДС (кол. Q–AA) не се създава." : ""),
+        }));
+
+        // With 3 the invoice is in the ledger. A purchase from abroad is there with its protocol.
+        if (!lines.Any(l => l.DealTypeOverride == null && l.AutoDealType == DealTypes.PurchaseNoCredit)) return;
+
+        bool impossible = !PartnerIdentity.HasPossibleLength(doc.Eik) || !PartnerIdentity.HasValidEikCheckDigit(doc.Eik);
+        if (foreign)
+            doc.Issues.Add(new Issue(IssueCode.ForeignNoDiary,
+                $"Доставчикът е чужд ({doc.VatNumber}), а с вид сделка 3 документът влиза в дневника. " +
+                "Ако за него има протокол, изберете вид 1 – иначе ще е в дневника два пъти."));
+        else if (impossible)
+            doc.Issues.Add(new Issue(IssueCode.ForeignNoDiary,
+                $"Номерът {doc.Eik} не е български ЕИК, а с вид сделка 3 документът влиза в дневника. " +
+                "Ако доставчикът е чужд и има протокол, изберете вид 1 – иначе ще е в дневника два пъти."));
     }
 
     private static void AddVatIssue(OperationDocument doc, VatGroup group)
@@ -194,18 +214,18 @@ internal static class PurchaseRules
         switch (group.Status)
         {
             case VatStatus.Unresolved when group.Bucket != LedgerBucket.PurchasePartialCredit:
-                doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.VatUnresolved,
+                doc.Issues.Add(new Issue(IssueCode.VatUnresolved,
                     $"ДДС {Money(group.Vat)} при основа {Money(group.Base)} не отговаря на 20% или 9%" +
                     (group.Percent is { } p ? $" (излиза {Money(p)}%)" : "") + " – вид сделка 4. Проверете."));
                 break;
 
             case VatStatus.Zero when group.DeclaredRate > 0m:
-                doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.VatZeroButDeclared,
+                doc.Issues.Add(new Issue(IssueCode.VatZeroButDeclared,
                     $"Обявена е ставка {Percent(group.DeclaredRate)}, а ДДС е 0 – вид сделка 3. Проверете."));
                 break;
 
             case VatStatus.WithinTolerance:
-                doc.Issues.Add(new Issue(IssueSeverity.Info, IssueCode.VatWithinTolerance,
+                doc.Issues.Add(new Issue(IssueCode.VatWithinTolerance,
                     $"ДДС {Money(group.Vat)} се различава с {Money(group.Difference)} от {Percent(group.Rate)} върху " +
                     $"{Money(group.Base)} – в допустимата разлика."));
                 break;
@@ -213,7 +233,7 @@ internal static class PurchaseRules
 
         if (group.Status is VatStatus.Exact or VatStatus.WithinTolerance && group.DeclaredRate is { } declared &&
             group.Rate != declared)
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.VatDifferentRate,
+            doc.Issues.Add(new Issue(IssueCode.VatDifferentRate,
                 $"Обявена е ставка „{(group.Lines[0].RateText.Length > 0 ? group.Lines[0].RateText : Percent(declared))}“, " +
                 $"а сумите отговарят на {Percent(group.Rate)}."));
     }

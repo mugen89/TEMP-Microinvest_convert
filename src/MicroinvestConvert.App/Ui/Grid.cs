@@ -38,6 +38,9 @@ internal sealed class Grid<T> : DataGridView where T : class
     /// <summary>After one or more cells of these rows were changed by the user.</summary>
     public event Action<IReadOnlyList<T>>? Edited;
 
+    /// <summary>A double click on a cell that is not edited.</summary>
+    public event Action<T>? RowActivated;
+
     /// <summary>The colours of a row or cell; called for every painted cell.</summary>
     [Browsable(false)]
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -160,16 +163,37 @@ internal sealed class Grid<T> : DataGridView where T : class
 
     public void SetRows(IEnumerable<T> rows)
     {
+        if (IsCurrentCellInEditMode) EndEdit();   // another window may ask for the refresh
+
         var current = Current;
+        int row = CurrentCell?.RowIndex ?? 0, column = CurrentCell?.ColumnIndex ?? -1;
         _rows = rows.ToList();
         if (_sortColumn >= 0) SortRows();
 
         RowCount = 0;            // drops stale cell state
         RowCount = _rows.Count;
         int at = current != null ? _rows.IndexOf(current) : -1;
-        if (at < 0 && _rows.Count > 0) at = 0;
-        if (at >= 0) CurrentCell = this[FirstVisibleColumn(), at];
+        if (at < 0 && _rows.Count > 0) at = Math.Clamp(row, 0, _rows.Count - 1);   // the one after it
+        if (at >= 0) CurrentCell = this[column >= 0 && Columns[column].Visible ? column : FirstVisibleColumn(), at];
         Invalidate();
+    }
+
+    /// <summary>Goes to a row; false when it is not shown.</summary>
+    public bool GoTo(T row)
+    {
+        int at = _rows.IndexOf(row);
+        if (at < 0) return false;
+        ClearSelection();
+        CurrentCell = this[CurrentCell?.ColumnIndex ?? FirstVisibleColumn(), at];
+        CurrentCell.Selected = true;
+        return true;
+    }
+
+    protected override void OnCellDoubleClick(DataGridViewCellEventArgs e)
+    {
+        base.OnCellDoubleClick(e);
+        if (e.RowIndex >= 0 && e.RowIndex < _rows.Count && e.ColumnIndex >= 0 && (ReadOnly || Columns[e.ColumnIndex].ReadOnly))
+            RowActivated?.Invoke(_rows[e.RowIndex]);
     }
 
     private int FirstVisibleColumn() => Columns.GetFirstColumn(DataGridViewElementStates.Visible)?.Index ?? 0;
@@ -305,7 +329,7 @@ internal sealed class Grid<T> : DataGridView where T : class
         var cells = new List<(int, int, string)>();
         for (int r = 0; r < block.Count && top + r < _rows.Count; r++)
             for (int c = 0; c < block[r].Length && c < visible.Count; c++)
-                if (_columns[visible[c]] is { Set: not null, IsCheck: false })
+                if (!Columns[visible[c]].ReadOnly && _columns[visible[c]] is { Set: not null, IsCheck: false })
                     cells.Add((top + r, visible[c], block[r][c]));
         Apply(cells);
     }

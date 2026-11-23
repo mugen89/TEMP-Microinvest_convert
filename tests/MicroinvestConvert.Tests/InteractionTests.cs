@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Windows.Forms;
 using MicroinvestConvert.App;
 using MicroinvestConvert.App.Forms;
+using MicroinvestConvert.App.Forms.Checks;
 using MicroinvestConvert.App.Ui;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Rules;
@@ -179,85 +180,248 @@ public sealed class InteractionTests : IDisposable
         Assert.Equal(3, ((DataGridView)postings).RowCount);
     });
 
-    // ----- the other windows -----
+    // ----- „Проверки" -----
 
     [Fact]
-    public void The_vat_window_splits_accepts_and_gives_back() => OnThread(() =>
+    public void The_vat_page_splits_accepts_and_gives_back() => OnScreen(Purchases(), (view, batch) =>
     {
-        var app = NewApp();
-        var batch = Purchases();
-        void Reprocess() => new DocumentProcessor(app.Settings.OptionsFor(batch.ClientEik)).Process(batch);
-        Reprocess();
-        Assert.Equal(1, VatCheckForm.OpenQuestions(batch));
-
-        using var form = new VatCheckForm(app, batch, Reprocess);
-        Show(form);
-        var grid = Field<Grid<VatGroup>>(form, "_grid");
+        Assert.Equal(1, VatPage.OpenQuestions(batch));
+        Assert.Equal("ДДС (1)", Field<Button>(view, "_vatCheck").Text);
+        var page = OpenPage<VatPage>(view, "ДДС (1)");
+        var grid = Field<Grid<VatGroup>>(page, "_grid");
         Assert.Equal("0000000002", Assert.Single(grid.Items).Document.Number);
+        Assert.False(view.HasUnsavedEdits);
 
-        Click(form, "Раздели: със и без ДДС");
+        Click(page, "Раздели: със и без ДДС");
         Assert.Equal(("450;90;30", "2;2;3"), (batch.Documents[1].Amounts(), batch.Documents[1].Deals()));
-        Assert.Equal(0, VatCheckForm.OpenQuestions(batch));
-        Assert.True(form.EditsMade);
+        Assert.Equal(0, VatPage.OpenQuestions(batch));
+        Assert.True(view.HasUnsavedEdits);
+        Assert.Equal("ДДС", Field<Button>(view, "_vatCheck").Text);   // the other window knows
 
-        Click(form, "Върни от файла");
+        Click(page, "Върни от файла");
         Assert.Equal("4;4", batch.Documents[1].Deals());
-        Click(form, "Приеми – вид 2");
+        Click(page, "Приеми – вид 2");
         Assert.Equal(("480;90", "2;2"), (batch.Documents[1].Amounts(), batch.Documents[1].Deals()));
-        Click(form, "Върни от файла");
+        Click(page, "Върни от файла");
 
-        Field<NumericUpDown>(form, "_perDocument").Value = 6.00m;   // 96 − 90 = 6
+        Field<NumericUpDown>(page, "_perDocument").Value = 6.00m;   // 96 − 90 = 6
         Pump();
         Assert.Equal("2;2", batch.Documents[1].Deals());
         Assert.Equal(6.00m, new AppState(_settings).Settings.General.TolerancePerDocument);
     });
 
     [Fact]
-    public void The_accounts_window_remembers_a_mapping_for_the_client() => OnThread(() =>
+    public void The_accounts_page_remembers_a_mapping_for_the_client() => OnScreen(Purchases(), (view, batch) =>
     {
-        var app = NewApp();
-        var batch = Purchases();
-        using var form = new AccountsForm(app, batch);
-        Show(form);
-        var grid = (DataGridView)Field<Control>(form, "_grid");
-        int row = Enumerable.Range(0, grid.RowCount).Single(r => Equals(grid[0, r].Value, "401"));
-        Type(grid, 4, row, "401/1");
-        Click(form, "Запомни");
+        var page = OpenPage<AccountsPage>(view, "Сметки");
+        var grid = (DataGridView)Field<Control>(page, "_grid");
+        Assert.False(ButtonOf(page, "Запомни").Enabled);
+        Type(grid, 4, RowOf(grid, 0, "401"), "401/1");
+        Assert.Equal("401", batch.Documents[0].CounterAccountOut);   // not before the button
+        Click(page, "Запомни");
 
+        Assert.Equal("401/1", batch.Documents[0].CounterAccountOut);
         var saved = new AppState(_settings).Settings;
         Assert.Equal("401/1", saved.Clients[batch.ClientEik].Accounts["401"]);
         Assert.Empty(saved.General.Accounts);
-        new DocumentProcessor(saved.OptionsFor(batch.ClientEik)).Process(batch);
-        Assert.Equal("401/1", batch.Documents[0].CounterAccountOut);
     });
 
     [Fact]
-    public void The_accounts_window_can_map_for_everybody_and_back() => OnThread(() =>
+    public void The_accounts_page_can_map_for_everybody_and_back() => OnScreen(Purchases(), (view, batch) =>
     {
-        var app = NewApp();
-        var batch = Purchases();
-        using (var form = new AccountsForm(app, batch))
-        {
-            Show(form);
-            Field<RadioButton>(form, "_everybody").Checked = true;
-            var grid = (DataGridView)Field<Control>(form, "_grid");
-            Type(grid, 4, Enumerable.Range(0, grid.RowCount).Single(r => Equals(grid[0, r].Value, "601/5")), "609/9");
-            Click(form, "Запомни");
-        }
+        var page = OpenPage<AccountsPage>(view, "Сметки");
+        var grid = (DataGridView)Field<Control>(page, "_grid");
+        Field<RadioButton>(page, "_everybody").Checked = true;
+        Type(grid, 4, RowOf(grid, 0, "601/5"), "609/9");
+        Click(page, "Запомни");
+        Assert.Equal("609/9", new AppState(_settings).Settings.General.Accounts["601/5"]);
+        Assert.StartsWith("609/9", batch.Documents[0].Accounts());
 
-        Assert.Equal("609/9", app.Settings.General.Accounts["601/5"]);
-
-        using (var form = new AccountsForm(app, batch))
-        {
-            Show(form);
-            Field<RadioButton>(form, "_everybody").Checked = true;
-            var grid = (DataGridView)Field<Control>(form, "_grid");
-            Type(grid, 4, Enumerable.Range(0, grid.RowCount).Single(r => Equals(grid[0, r].Value, "601/5")), "");
-            Click(form, "Запомни");
-        }
-
-        Assert.Empty(app.Settings.General.Accounts);
+        Type(grid, 4, RowOf(grid, 0, "601/5"), "");
+        Click(page, "Запомни");
+        Assert.Empty(new AppState(_settings).Settings.General.Accounts);
+        Assert.StartsWith("601/5", batch.Documents[0].Accounts());
     });
+
+    [Fact]
+    public void What_is_typed_on_the_accounts_page_survives_a_refresh_and_can_be_dropped() => OnScreen(Purchases(), (view, batch) =>
+    {
+        var page = OpenPage<AccountsPage>(view, "Сметки");
+        var grid = (DataGridView)Field<Control>(page, "_grid");
+        Type(grid, 4, RowOf(grid, 0, "401"), "401/7");
+
+        Type(Field<Grid<OperationDocument>>(view, "_documents"), 4, 0, "0000000777");   // a correction in the other window
+        Assert.Equal("401/7", grid[4, RowOf(grid, 0, "401")].Value);
+        Click(page, "Отказ");
+        Assert.Equal("401", grid[4, RowOf(grid, 0, "401")].Value);
+    });
+
+    [Fact]
+    public void Every_check_is_listed_and_the_ones_that_wait_come_first() => OnScreen(Purchases(), (view, batch) =>
+    {
+        Assert.Equal("Проверки (2)", Field<Button>(view, "_allChecks").Text);
+        var page = OpenPage<AllChecksPage>(view, "Проверки (2)");
+        var checks = (DataGridView)Field<Control>(page, "_checks");
+        Assert.Equal(Core.Checks.CheckCatalog.For(OperationKind.Purchase).Count(), checks.RowCount);
+        Assert.Equal("Сумите не са във валутата на книгите", checks[2, 0].Value);   // an error
+        Assert.Equal("ДДС не отговаря на ставка", checks[2, 1].Value);              // a warning
+
+        Field<CheckBox>(page, "_onlyFound").Checked = true;
+        Pump();
+        Assert.Equal(["Сумите не са във валутата на книгите", "ДДС не отговаря на ставка"],
+            Enumerable.Range(0, 2).Select(r => (string)checks[2, r].Value!));
+        Assert.True(checks.RowCount < 6);
+    });
+
+    [Fact]
+    public void A_finding_is_answered_in_its_own_field() => OnScreen(Purchases(), (view, batch) =>
+    {
+        var page = OpenPage<AllChecksPage>(view, "Проверки (2)");
+        var findings = (DataGridView)Field<Control>(page, "_findings");
+        Choose(page, IssueCode.ForeignCurrency);
+        Assert.Equal(1, findings.RowCount);
+        int currency = Enumerable.Range(0, findings.ColumnCount).Single(c => findings.Columns[c].HeaderText == "✎ Валута");
+        Assert.True(findings.Columns[currency].Visible);
+        Assert.False(findings.Columns[currency].ReadOnly);
+        Assert.False(findings.Columns.Cast<DataGridViewColumn>().Single(c => c.HeaderText == "Основание").Visible);
+
+        Type(findings, currency, 0, "eur");
+        Assert.True(batch.Documents[2].WillExport);
+        Assert.True(view.HasUnsavedEdits);
+        Assert.Equal(0, findings.RowCount);
+        Assert.Equal("Проверки (1)", Field<Button>(view, "_allChecks").Text);
+    });
+
+    [Fact]
+    public void A_warning_is_ticked_off_and_comes_back_when_it_changes() => OnScreen(Purchases(), (view, batch) =>
+    {
+        var page = OpenPage<AllChecksPage>(view, "Проверки (2)");
+        var findings = (DataGridView)Field<Control>(page, "_findings");
+        Choose(page, IssueCode.VatUnresolved);
+        Assert.True(batch.Documents[1].HasWarnings);
+
+        findings.SelectAll();
+        Click(page, "Отбележи като прегледани");
+        Assert.False(batch.Documents[1].HasWarnings);
+        Assert.Equal(0, VatPage.OpenQuestions(batch));
+        Assert.False(view.HasUnsavedEdits);         // nothing that is written has changed
+        Assert.Equal("4;4", batch.Documents[1].Deals());
+        Assert.Equal(1, findings.RowCount);         // still listed, ticked
+
+        Click(page, "Върни за преглед");
+        Assert.True(batch.Documents[1].HasWarnings);
+        Click(page, "Отбележи като прегледани");
+
+        batch.Documents[1].Lines[0].TrySet(LineField.Vat, "91", out _);
+        view.Edited([batch.Documents[1]]);
+        Assert.True(batch.Documents[1].HasWarnings);   // another amount, another question
+    });
+
+    [Fact]
+    public void A_check_can_be_switched_off_but_not_one_that_holds_documents_back() => OnScreen(Purchases(), (view, batch) =>
+    {
+        var page = OpenPage<AllChecksPage>(view, "Проверки (2)");
+        var checks = (DataGridView)Field<Control>(page, "_checks");
+        Untick(checks, 0, RowOf(checks, 2, "ДДС не отговаря на ставка"));
+        Assert.False(batch.Documents[1].Has(IssueCode.VatUnresolved));
+        Assert.True(new AppState(_settings).Settings.General.IsOff(IssueCode.VatUnresolved));
+
+        Untick(checks, 0, RowOf(checks, 2, "ДДС не отговаря на ставка"), value: true);
+        Assert.True(batch.Documents[1].Has(IssueCode.VatUnresolved));
+        Assert.False(new AppState(_settings).Settings.General.IsOff(IssueCode.VatUnresolved));
+
+        var general = new Core.Settings.ConverterSettings();
+        general.SetOff(IssueCode.ForeignCurrency, true);
+        Assert.False(general.IsOff(IssueCode.ForeignCurrency));
+    });
+
+    [Fact]
+    public void Deal_types_are_set_for_everything_a_check_found() => OnScreen(
+        new TestSheet(Layout.Purchases)
+            .Purchase(1d, "1", 100, 0, ("AC", "-"), ("AD", "-"), ("AG", "ДА"), ("J", "DE123456789"))
+            .Purchase(2d, "2", 50, 0, ("AC", "-"), ("AD", "-"), ("AG", "ДА"), ("J", "EL123456789"))
+            .Purchase(3d, "3", 70, 0, ("AC", "-"), ("AD", "-"), ("AG", "ДА"))
+            .Read(), (view, batch) =>
+    {
+        Assert.Equal(["3", "3", "3"], batch.Documents.Select(d => d.Deals()));
+        var page = OpenPage<AllChecksPage>(view, "Проверки (2)");
+        Choose(page, IssueCode.ForeignNoDiary);
+        var findings = (DataGridView)Field<Control>(page, "_findings");
+        Assert.Equal(2, findings.RowCount);
+
+        findings.SelectAll();
+        Field<ComboBox>(page, "_deal").SelectedItem = "1 - Вътрешен оборот";
+        Click(page, "Задай вид");
+        Assert.Equal(["1", "1", "3"], batch.Documents.Select(d => d.Deals()));
+        Assert.Equal("Проверки", Field<Button>(view, "_allChecks").Text);
+    });
+
+    [Fact]
+    public void The_deal_page_shows_the_totals_and_changes_the_type() => OnScreen(Purchases(), (view, batch) =>
+    {
+        OpenPage<AllChecksPage>(view, "Проверки (2)");
+        var page = Page<DealsPage>(view);
+        var totals = (DataGridView)Field<Control>(page, "_totals");
+        Assert.Equal(["2 - Получени доставки, ВОП с право на ПДК", "4 - Получени доставки, ВОП с право на ЧДК"],
+            Enumerable.Range(0, totals.RowCount).Select(r => (string)totals[0, r].Value!));
+        Assert.Equal(("100,00", "20,00", "120,00"), ((string)totals[3, 0].Value!, (string)totals[4, 0].Value!, (string)totals[5, 0].Value!));
+
+        totals.CurrentCell = totals[0, 1];
+        Pump();
+        var parts = (DataGridView)Field<Control>(page, "_parts");
+        Choose(parts, ColumnOf(parts, "✎ Вид"), 0, "2");
+        Assert.Equal("2;2", batch.Documents[1].Deals());
+        Assert.Equal(1, totals.RowCount);
+        Assert.True(view.HasUnsavedEdits);
+    });
+
+    [Fact]
+    public void The_partners_page_lists_each_once_and_corrects_all_of_its_documents() => OnScreen(
+        new TestSheet(Layout.Purchases)
+            .Purchase(1d, "1", 100, 20)
+            .Purchase(2d, "2", 100, 20)
+            .Purchase(3d, "3", 100, 20, ("I", "Друго Име ООД"))
+            .Purchase(4d, "4", 100, 20, ("J", "12345678901"))
+            .Read(), (view, batch) =>
+    {
+        OpenPage<AllChecksPage>(view, "Проверки (1)");
+        var page = Page<PartnersPage>(view);
+        var grid = (DataGridView)Field<Control>(page, "_grid");
+        Assert.Equal(3, grid.RowCount);
+        string Note(string name, string eik) => (string)grid[6, Enumerable.Range(0, grid.RowCount)
+            .Single(r => Equals(grid[0, r].Value, name) && Equals(grid[1, r].Value, eik))].Value!;
+
+        Assert.Contains("същият номер и с име „Друго Име ООД“", Note("Тест Партньор ООД", SupplierEik));
+        Assert.Contains("същият номер и с име „Тест Партньор ООД“", Note("Друго Име ООД", SupplierEik));
+        Assert.Contains("номер с 11 цифри", Note("Тест Партньор ООД", "12345678901"));
+        Assert.Contains($"същото име и с номер {SupplierEik}", Note("Тест Партньор ООД", "12345678901"));
+
+        int row = Enumerable.Range(0, grid.RowCount).Single(r => Equals(grid[0, r].Value, "Тест Партньор ООД") && Equals(grid[1, r].Value, SupplierEik));
+        Type(grid, 0, row, "Тест Партньор ЕООД");
+        Assert.Equal(["Тест Партньор ЕООД", "Тест Партньор ЕООД", "Друго Име ООД", "Тест Партньор ООД"], batch.Documents.Select(d => d.PartnerName));
+    });
+
+    [Fact]
+    public void A_double_click_shows_the_document_whatever_the_filter_hides() => OnScreen(Purchases(), (view, batch) =>
+    {
+        Field<TextBox>(view, "_search").Text = "няма такъв";
+        Pump();
+        Assert.Empty(Field<Grid<OperationDocument>>(view, "_documents").Items);
+        view.Reveal(batch.Documents[2]);
+        Pump();
+        Assert.Same(batch.Documents[2], Field<Grid<OperationDocument>>(view, "_documents").Current);
+    });
+
+    [Fact]
+    public void Foreign_invoices_have_no_vat_page() => OnScreen(
+        new TestSheet(Layout.Foreign).Invoice(1d, "INV-1", 10, "EUR", 10).Read(), (view, _) =>
+    {
+        Assert.False(ButtonOf(view, "ДДС").Visible);
+        OpenPage<AllChecksPage>(view, "Проверки");
+        Assert.Equal(["Всички проверки", "Вид сделка", "Сметки", "Контрагенти"], Pages(view).Select(p => p.Title));
+    });
+
+    // ----- settings -----
 
     [Fact]
     public void The_settings_window_keeps_an_exception_for_one_client() => OnThread(() =>
@@ -268,6 +432,8 @@ public sealed class InteractionTests : IDisposable
         {
             Show(form);
             Field<TextBox>(form, "_clientPurchaseVat").Text = "453/1/9";
+            Assert.Equal("3 – без данъчен кредит (влиза в дневника, к. 9)", Field<ComboBox>(form, "_noDiary").Text);
+            Assert.Equal("След всяка сметка (602;453/1;621;453/1)", Field<ComboBox>(form, "_vatLines").Text);
             Field<ComboBox>(form, "_dealFormat").SelectedIndex = 1;
             Field<ComboBox>(form, "_noDiary").SelectedIndex = 2;
             Click(form, "Запази");
@@ -298,6 +464,53 @@ public sealed class InteractionTests : IDisposable
     });
 
     // ----- operating -----
+
+    private static ChecksForm Checks(WorkView view)
+    {
+        var form = Field<ChecksForm>(view, "_checks");
+        form.Location = new Point(-6000, 0);
+        return form;
+    }
+
+    private static List<CheckPage> Pages(WorkView view) => Field<List<CheckPage>>(Checks(view), "_pages");
+
+    /// <summary>Opens „Проверки" with a button of the toolbar; returns the page it shows.</summary>
+    private static T OpenPage<T>(WorkView view, string button) where T : CheckPage
+    {
+        Click(view, button);
+        var page = Pages(view).OfType<T>().Single();
+        Assert.True(page.Visible);
+        return page;
+    }
+
+    private static T Page<T>(WorkView view) where T : CheckPage
+    {
+        var page = Pages(view).OfType<T>().Single();
+        Checks(view).ShowPage(page.Title);
+        Pump();
+        return page;
+    }
+
+    private static void Choose(AllChecksPage page, IssueCode code)
+    {
+        var checks = (DataGridView)Field<Control>(page, "_checks");
+        checks.CurrentCell = checks[2, RowOf(checks, 2, Core.Checks.CheckCatalog.Get(code).Title)];
+        Pump();
+    }
+
+    private static int RowOf(DataGridView grid, int column, string value) =>
+        Enumerable.Range(0, grid.RowCount).Single(r => Equals(grid[column, r].Value, value));
+
+    private static Button ButtonOf(Control parent, string text) => All(parent).OfType<Button>().Single(b => b.Text == text);
+
+    private static void Untick(DataGridView grid, int column, int row, bool value = false)
+    {
+        grid.CurrentCell = grid[column, row];
+        grid.BeginEdit(false);
+        ((DataGridViewCheckBoxCell)grid.CurrentCell).EditingCellFormattedValue = value;
+        grid.NotifyCurrentCellDirty(true);
+        Pump();
+    }
 
     private AppState NewApp()
     {
@@ -405,7 +618,7 @@ public sealed class InteractionTests : IDisposable
 
     private static void Click(Control parent, string text)
     {
-        var button = All(parent).OfType<Button>().Single(b => b.Text == text);
+        var button = ButtonOf(parent, text);
         Assert.True(button.Enabled, text);
         button.PerformClick();
         Pump();

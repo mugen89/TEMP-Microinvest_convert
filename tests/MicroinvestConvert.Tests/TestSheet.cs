@@ -16,6 +16,7 @@ internal sealed class TestSheet
         Purchases,
         Sales,
         SalesBeforeJuly2026,
+        Foreign,
     }
 
     public const string SupplierVat = "BG123456786";   // a valid check digit
@@ -28,7 +29,7 @@ internal sealed class TestSheet
     public TestSheet(Layout layout, bool indexRow = true, bool headers = true)
     {
         _layout = layout;
-        _columns = layout switch { Layout.Purchases => 43, Layout.Sales => 47, _ => 44 };
+        _columns = layout switch { Layout.Purchases => 43, Layout.Sales => 47, Layout.Foreign => 45, _ => 44 };
 
         Raw(("A", "Тестова Фирма ЕООД 12.08.2026"), ("B", "987654326"));
         Raw(("A", "Общи данни на Документ"));
@@ -40,6 +41,15 @@ internal sealed class TestSheet
 
     private void Header()
     {
+        if (_layout == Layout.Foreign)
+        {
+            Raw(("A", "№"), ("B", "Вид Документ"), ("C", "Код Документ"), ("H", "Данъчен Период на Експорта"), ("I", "Доставчик"),
+                ("J", "ЕИК Номер на Доставчик"), ("K", "VAT Номер на Доставчик"), ("L", "Код на Счетоводна сметка"),
+                ("V", "Един. Цена"), ("W", "Данъчна  Основа Продавач"), ("AA", "Вид на ДДС Третиране от Купувача   "),
+                ("AH", "без ДДС Дневник"), ("AI", "Обща сума евро Продавач"), ("AJ", "Начин на Плащане"));
+            return;
+        }
+
         var cells = new List<(string, object?)>
         {
             ("A", "№"), ("B", "Вид Документ"), ("C", "Код Документ"), ("H", "Данъчен\nПериод на\nЕкспорта\n"),
@@ -99,6 +109,19 @@ internal sealed class TestSheet
         ]);
     }
 
+    /// <summary>An invoice from abroad: its amount in its currency, and the same in EUR.</summary>
+    public TestSheet Invoice(object index, string number, decimal total, string currency, decimal? euro, params (string Column, object? Value)[] cells) => Raw(
+    [
+        ("A", index), ("B", "Фактура"), ("C", 1d), ("D", number), ("E", "10.09.2026"), ("F", "25.09.2026"), ("H", "09.2026"),
+        ("I", "Example Software Inc."), ("J", "-"), ("K", "999999999999999Examp"),
+        ("L", "602"), ("M", "Разходи за външни услуги"), ("N", "1"), ("O", "Софтуер"), ("P", "Софтуер"), ("Q", "26.09.2026"),
+        ("R", "Услуга"), ("S", "Месечен абонамент"), ("T", 1d), ("U", currency), ("V", (double)total),
+        ("W", (double)total), ("X", "Необлагаема"), ("Y", 0d), ("Z", (double)total), ("AA", "Без Дневник Покупки"),
+        ("AB", "-"), ("AC", "-"), ("AD", "-"), ("AE", "-"), ("AF", "-"), ("AG", "-"), ("AH", "ДА"), ("AI", euro is { } e ? (double)e : "-"),
+        ("AJ", "По сметка - банкова"), ("AK", "4011"), ("AL", "-"), ("AM", "602"), ("AN", "Разход за външни услуги"), ("AO", "-"), ("AP", "-"),
+        .. cells,
+    ]);
+
     private TestSheet Row(object index, string number, (string Column, object? Value)[] cells)
     {
         var all = new List<(string, object?)>
@@ -112,9 +135,33 @@ internal sealed class TestSheet
     }
 
     public SheetData ToSheet(string? name = null) =>
-        new(name ?? (_layout == Layout.Purchases ? "Експорт Покупки" : "Експорт Продажби"), _rows);
+        new(name ?? (_layout switch { Layout.Purchases => "Експорт Покупки", Layout.Foreign => "Експорт Чуждестранни", _ => "Експорт Продажби" }), _rows);
 
     public OperationBatch Read() => AiReader.Read([ToSheet()], "test.xlsx");
+
+    /// <summary>The same as a workbook on the disk; returns its path.</summary>
+    public string Save(string folder, string name)
+    {
+        var sheet = ToSheet();
+        using var book = new NPOI.HSSF.UserModel.HSSFWorkbook();
+        var page = book.CreateSheet(sheet.Name);
+        for (int r = 0; r < _rows.Count; r++)
+        {
+            var row = page.CreateRow(r);
+            for (int c = 0; c < _rows[r].Length; c++)
+                switch (_rows[r][c])
+                {
+                    case null: break;
+                    case double number: row.CreateCell(c).SetCellValue(number); break;
+                    case var text: row.CreateCell(c).SetCellValue(text.ToString()); break;
+                }
+        }
+
+        string path = Path.Combine(folder, name);
+        using var file = File.Create(path);
+        book.Write(file, true);
+        return path;
+    }
 
     public OperationBatch Process(ConverterSettings? settings = null, ClientSettings? client = null)
     {

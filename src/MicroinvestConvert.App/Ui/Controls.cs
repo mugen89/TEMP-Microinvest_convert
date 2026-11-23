@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 
 namespace MicroinvestConvert.App.Ui;
 
@@ -17,6 +18,7 @@ internal abstract class AppForm : Form
         Icon = AppInfo.LoadIcon();
         BackColor = Theme.Window;
         ForeColor = Theme.Ink;
+        ShowInTaskbar = false;   // one program, one button: only the start window has it
     }
 
     /// <summary>The last line of every constructor.</summary>
@@ -26,15 +28,44 @@ internal abstract class AppForm : Form
         PerformLayout();
     }
 
+    // Minimising a window hides the windows it owns, but not the ones those own: „Проверки"
+    // would stay on the desktop without its module. The word is passed on.
+    protected override void WndProc(ref Message m)
+    {
+        const int WmShowWindow = 0x0018, ParentClosing = 1, ParentOpening = 3;
+        base.WndProc(ref m);
+        if (m.Msg != WmShowWindow) return;
+
+        if (m.LParam == ParentClosing) ShowOwnedPopups(Handle, false);
+        else if (m.LParam == ParentOpening) ShowOwnedPopups(Handle, true);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowOwnedPopups(nint window, bool show);
+
     /// <summary>A window over the main one.</summary>
     protected void AsDialog(int width, int height, int minWidth, int minHeight, bool maximize = true)
     {
         ClientSize = new Size(width, height);
         MinimumSize = new Size(minWidth, minHeight);
         StartPosition = FormStartPosition.CenterParent;
-        ShowInTaskbar = false;
         MinimizeBox = false;
         MaximizeBox = maximize;
+    }
+
+    /// <summary>
+    /// Over the middle of another window, whole on its screen. For windows that stay open beside
+    /// it: CenterParent is for dialogs only.
+    /// </summary>
+    protected void CenterOver(Form other, int step = 0)
+    {
+        var area = Screen.FromControl(other).WorkingArea;
+        MinimumSize = new Size(Math.Min(MinimumSize.Width, area.Width), Math.Min(MinimumSize.Height, area.Height));
+        Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+        int x = other.Left + (other.Width - Width) / 2 + step, y = other.Top + (other.Height - Height) / 2 + step;
+        Location = new Point(
+            Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - Width)),
+            Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - Height)));
     }
 }
 

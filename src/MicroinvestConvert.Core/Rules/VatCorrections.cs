@@ -4,7 +4,7 @@ using MicroinvestConvert.Core.Nomenclature;
 namespace MicroinvestConvert.Core.Rules;
 
 /// <summary>
-/// What the user can decide in „Проверка на ДДС". Each returns false when the amounts do not
+/// What the user can decide in „Проверки → ДДС". Each returns false when the amounts do not
 /// allow it. The document has to be processed again afterwards.
 /// </summary>
 public static class VatCorrections

@@ -293,6 +293,58 @@ public class SettingsTests
     }
 
     [Fact]
+    public void The_new_defaults_reach_settings_written_by_1_0()
+    {
+        SettingsFile Written(string general)
+        {
+            string path = TempFile();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "{\"version\":1,\"general\":{" + general + "}}");
+            var file = new SettingsStore(path).Load();
+            Directory.Delete(Path.GetDirectoryName(path)!, true);
+            return file;
+        }
+
+        // 1.0 wrote everything, so the old defaults are there whether chosen or not.
+        var untouched = Written("\"vatLines\":\"PerDealType\",\"noDiary\":\"Internal\"");
+        Assert.Equal((VatLines.PerAccount, NoDiaryMode.NoCredit, 2), (untouched.General.VatLines, untouched.General.NoDiary, untouched.Version));
+
+        Assert.Equal(NoDiaryMode.Skip, Written("\"noDiary\":\"Skip\"").General.NoDiary);   // chosen: stays
+    }
+
+    [Fact]
+    public void What_is_chosen_after_that_stays_chosen()
+    {
+        string path = TempFile();
+        var file = new SettingsFile();
+        file.General.VatLines = VatLines.PerDealType;
+        file.General.NoDiary = NoDiaryMode.Internal;
+        new SettingsStore(path).Save(file);
+        var loaded = new SettingsStore(path).Load();
+        Assert.Equal((VatLines.PerDealType, NoDiaryMode.Internal), (loaded.General.VatLines, loaded.General.NoDiary));
+        Directory.Delete(Path.GetDirectoryName(path)!, true);
+    }
+
+    [Fact]
+    public void Switched_off_checks_are_remembered_and_unknown_ones_do_no_harm()
+    {
+        string path = TempFile();
+        var file = new SettingsFile();
+        file.General.SetOff(IssueCode.Duplicate, true);
+        file.General.ChecksOff.Add("SomethingOfANewerVersion");
+        new SettingsStore(path).Save(file);
+
+        var store = new SettingsStore(path);
+        var loaded = store.Load();
+        Assert.Equal("", store.LoadProblem);
+        Assert.True(loaded.General.IsOff(IssueCode.Duplicate));
+        Assert.False(loaded.General.IsOff(IssueCode.MissingReason));
+        loaded.General.SetOff(IssueCode.Duplicate, false);
+        Assert.False(loaded.General.IsOff(IssueCode.Duplicate));
+        Directory.Delete(Path.GetDirectoryName(path)!, true);
+    }
+
+    [Fact]
     public void Nulls_and_blanks_in_the_file_are_repaired()
     {
         string path = TempFile();

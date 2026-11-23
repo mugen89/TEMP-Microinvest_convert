@@ -5,30 +5,47 @@ using MicroinvestConvert.Core.Source;
 
 namespace MicroinvestConvert.App.Forms;
 
-/// <summary>The window: a header, a bar for news, and either the start or the opened file.</summary>
-internal sealed class MainForm : AppForm
+/// <summary>
+/// The start window: one card per module, the last files, settings and updates. Every module
+/// opens in a window of its own, which belongs to this one – so the program has one button on
+/// the taskbar, and minimising or closing this window takes the others with it.
+/// </summary>
+internal sealed class MainForm : AppForm, IHub
 {
-    private readonly AppState _app;
+    private static readonly (OperationKind Kind, string Source, string Rule)[] Modules =
+    [
+        (OperationKind.Purchase, "Експорт „Покупки“ от AI Accounting",
+            "Вид сделка 2, 3 или 4 – от данъчния кредит и изчисления ДДС."),
+        (OperationKind.Sale, "Експорт „Продажби“ от AI Accounting",
+            "Вид сделка и VIES – от колоната на дневника."),
+        (OperationKind.Foreign, "Експорт „Чуждестранни“ от AI Accounting",
+            "Фактури от чужбина в евро, вид сделка 1. Протоколът се въвежда в Делта Pro."),
+    ];
+
     private readonly UpdateService _updates;
-    private readonly Panel _content = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
+    private readonly Dictionary<OperationKind, ModuleForm> _windows = [];
+    private readonly Dictionary<OperationKind, ModuleCard> _cards = [];
     private readonly MessageBar _news = new(Color.FromArgb(255, 244, 214), Theme.WarningInk);
-    private readonly StartView _start;
-    private WorkView? _work;
+    private readonly Label _recentTitle = Make.Label("Последни файлове", font: Theme.Heading);
+    private readonly FlowLayoutPanel _recent = new()
+    {
+        AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown,
+        WrapContents = false, Margin = Padding.Empty,
+    };
+
+    public AppState App { get; }
 
     public MainForm(AppState app, UpdateService updates)
     {
-        _app = app;
+        App = app;
         _updates = updates;
 
         Text = $"{AppInfo.Name} {AppInfo.VersionText}";
-        ClientSize = new Size(1360, 820);
-        MinimumSize = new Size(1060, 640);
+        ClientSize = new Size(1080, 640);
+        MinimumSize = new Size(960, 540);
         StartPosition = FormStartPosition.CenterScreen;
-        AllowDrop = true;
+        ShowInTaskbar = true;
         KeyPreview = true;
-
-        _start = new StartView(app);
-        _start.FileChosen += (path, kind) => OpenFile(path, kind);
 
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -37,12 +54,15 @@ internal sealed class MainForm : AppForm
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.Controls.Add(BuildHeader(), 0, 0);
         root.Controls.Add(_news, 0, 1);
-        root.Controls.Add(_content, 0, 2);
+        root.Controls.Add(BuildContent(), 0, 2);
         Controls.Add(root);
 
-        ShowStart();
+        ExcelFiles.AcceptDrops(this, files => OpenFiles(files, null, this));
+        RefreshRecent();
         EndLayout();
     }
+
+    // ----- content -----
 
     private Control BuildHeader()
     {
@@ -61,9 +81,9 @@ internal sealed class MainForm : AppForm
         subtitle.Margin = new Padding(8, 9, 3, 3);
 
         var settings = new FlatButton("Настройки", ButtonLook.Quiet);
-        settings.Click += (_, _) => ShowSettings();
+        settings.Click += (_, _) => ShowSettings(this, OnlyClient());
         var deals = new FlatButton("Видове сделки", ButtonLook.Quiet);
-        deals.Click += (_, _) => ShowDealTypes();
+        deals.Click += (_, _) => ShowDealTypes(this);
         var update = new FlatButton("Обновяване", ButtonLook.Quiet);
         update.Click += (_, _) => ShowUpdates();
         foreach (var button in new[] { settings, deals, update }) button.TabStop = false;
@@ -79,124 +99,188 @@ internal sealed class MainForm : AppForm
         return bar;
     }
 
-    // ----- start and work -----
-
-    private void ShowStart()
+    private Control BuildContent()
     {
-        _start.RefreshRecent();
-        Swap(_start);
-        _work?.Dispose();
-        _work = null;
-        Text = $"{AppInfo.Name} {AppInfo.VersionText}";
+        var cards = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = Modules.Length, RowCount = 1, Margin = Padding.Empty };
+        cards.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        for (int i = 0; i < Modules.Length; i++)
+        {
+            var (kind, source, rule) = Modules[i];
+            var card = new ModuleCard(kind, source, rule);
+            card.OpenRequested += () => ShowModule(kind);
+            card.PickRequested += () => { if (ExcelFiles.Pick(this, source) is { } path) OpenFiles([path], kind, this); };
+            card.FilesDropped += files => OpenFiles(files, kind, this);
+            _cards[kind] = card;
+
+            cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / Modules.Length));
+            cards.Controls.Add(card, i, 0);
+        }
+
+        var hint = Make.Label("Може да пуснете файла и където и да е върху прозореца – видът му се разпознава сам.", Theme.Muted);
+        hint.Margin = new Padding(6, 4, 3, 10);
+        _recentTitle.Margin = new Padding(6, 4, 3, 4);
+
+        var page = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty, Padding = new Padding(14, 12, 14, 10),
+        };
+        page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        page.Controls.Add(cards, 0, 0);
+        page.Controls.Add(hint, 0, 1);
+        page.Controls.Add(_recentTitle, 0, 2);
+        page.Controls.Add(_recent, 0, 3);
+        return page;
     }
 
-    private void Swap(Control view)
+    private void RefreshRecent()
     {
-        _content.SuspendLayout();
-        _content.Controls.Clear();
-        _content.Controls.Add(view);
-        _content.ResumeLayout();
+        _recent.SuspendLayout();
+        foreach (Control old in _recent.Controls.Cast<Control>().ToList()) old.Dispose();
+
+        var existing = App.Settings.RecentFiles.Where(File.Exists).Take(5).ToList();
+        foreach (string path in existing)
+        {
+            string name = Path.GetFileName(path);
+            var link = new LinkLabel
+            {
+                Text = name + "   " + Path.GetDirectoryName(path),
+                AutoSize = true, MaximumSize = new Size(LogicalToDeviceUnits(980), 0), AutoEllipsis = true,
+                Margin = new Padding(8, 2, 3, 2), Font = Theme.Base, LinkArea = new LinkArea(0, name.Length),
+                LinkColor = Theme.EditedInk, ActiveLinkColor = Theme.EditedInk, LinkBehavior = LinkBehavior.HoverUnderline,
+                ForeColor = Theme.Muted, UseMnemonic = false,
+            };
+            link.LinkClicked += (_, _) => OpenFiles([path], null, this);
+            _recent.Controls.Add(link);
+        }
+
+        _recentTitle.Visible = existing.Count > 0;
+        _recent.ResumeLayout();
     }
 
-    /// <summary>Opens a file. <paramref name="expected"/> is the card the user chose, if any.</summary>
-    public void OpenFile(string path, OperationKind? expected = null)
+    // ----- modules -----
+
+    public void ShowModule(OperationKind kind)
     {
-        if (!LeaveWork()) return;
+        var window = WindowOf(kind);
+        if (!window.Visible) window.Show(this);
+        window.Activate();
+    }
 
-        OperationBatch batch;
-        Cursor = Cursors.WaitCursor;
-        try
-        {
-            batch = AiReader.Read(path);
-        }
-        catch (ConvertException ex)
-        {
-            Cursor = Cursors.Default;
-            Dialogs.Warning(this, "Файлът не може да бъде обработен", ex.Message);
-            return;
-        }
-        finally
-        {
-            Cursor = Cursors.Default;
-        }
+    private ModuleForm WindowOf(OperationKind kind)
+    {
+        if (_windows.TryGetValue(kind, out var open)) return open;
 
-        if (expected is { } kind && kind != batch.Kind)
+        var window = new ModuleForm(this, kind, _windows.Count);
+        window.FormClosed += (_, _) =>
         {
-            string is_ = batch.Kind == OperationKind.Purchase ? "покупки" : "продажби";
-            string wanted = kind == OperationKind.Purchase ? "Покупки" : "Продажби";
-            if (!Dialogs.Ask(this, $"Това е експорт на {is_}",
-                    $"Избрахте „{wanted}“, но файлът е „{batch.LayoutName}“. Да го отворя ли като {is_}?",
-                    $"Отвори като {is_}", "Отказ"))
+            _windows.Remove(kind);
+            ModuleChanged();
+        };
+        _windows[kind] = window;
+        return window;
+    }
+
+    public void ShowStart()
+    {
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    public void ModuleChanged()
+    {
+        if (IsDisposed) return;
+        foreach (var (kind, card) in _cards) card.ShowState(_windows.GetValueOrDefault(kind));
+    }
+
+    /// <summary>
+    /// Opens files, each in the window of its kind. <paramref name="expected"/> is the module the
+    /// user pointed at; another kind is opened after a question.
+    /// </summary>
+    public void OpenFiles(IReadOnlyList<string> paths, OperationKind? expected, Form asker)
+    {
+        var opened = new HashSet<OperationKind>();
+        var problems = new List<string>();
+
+        foreach (string path in paths)
+        {
+            string name = Path.GetFileName(path);
+            OperationBatch batch;
+            Cursor.Current = Cursors.WaitCursor;
+            try
+            {
+                batch = AiReader.Read(path);
+            }
+            catch (ConvertException ex)
+            {
+                problems.Add(paths.Count > 1 ? $"{name}: {ex.Message}" : ex.Message);
+                continue;
+            }
+            finally
+            {
+                Cursor.Current = Cursors.Default;
+            }
+
+            string module = batch.Kind.Title();
+            if (paths.Count == 1 && expected is { } wanted && wanted != batch.Kind &&
+                !Dialogs.Ask(asker, $"Това е файл за „{module}“",
+                    $"Избрахте „{wanted.Title()}“, а файлът е „{batch.LayoutName}“. Да го отворя ли в „{module}“?", $"Отвори в „{module}“", "Отказ"))
                 return;
+
+            if (!opened.Add(batch.Kind)) problems.Add($"{name}: в „{module}“ вече е отворен първият от пуснатите файлове.");
+            else Open(batch, path);
         }
 
-        _app.Settings.AddRecent(path);
-        _app.Save();
-
-        var work = new WorkView(_app, batch);
-        work.BackRequested += () => { if (LeaveWork()) ShowStart(); };
-        work.OpenRequested += () => { if (StartView.PickFile(this) is { } other) OpenFile(other); };
-        Swap(work);
-        _work?.Dispose();
-        _work = work;
-        Text = $"{Path.GetFileName(path)} – {AppInfo.Name} {AppInfo.VersionText}";
+        if (problems.Count > 0)
+            Dialogs.Warning(asker, paths.Count > 1 ? "Не всички файлове са отворени" : "Файлът не може да бъде обработен",
+                string.Join("\n\n", problems));
     }
 
-    // Corrections live in memory only, so leaving them behind is asked about.
-    private bool LeaveWork()
+    private void Open(OperationBatch batch, string path)
     {
-        if (_work is not { HasUnsavedEdits: true }) return true;
-        return Dialogs.Ask(this, "Има незаписани корекции",
-            "Корекциите важат само за отворения файл и ще се загубят.", "Продължи без тях", "Остани", warning: true);
-    }
+        var window = WindowOf(batch.Kind);
+        if (!window.LeaveWork()) return;
 
-    protected override void OnFormClosing(FormClosingEventArgs e)
-    {
-        if (e.CloseReason == CloseReason.UserClosing && !LeaveWork()) e.Cancel = true;
-        base.OnFormClosing(e);
-    }
+        App.Settings.AddRecent(path);
+        App.Save();
+        RefreshRecent();
 
-    protected override void OnDragEnter(DragEventArgs e)
-    {
-        base.OnDragEnter(e);
-        e.Effect = DroppedFile(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
+        window.Show(batch);
+        ShowModule(batch.Kind);
     }
-
-    protected override void OnDragDrop(DragEventArgs e)
-    {
-        base.OnDragDrop(e);
-        // After the drop has finished: a dialog inside it would freeze the source window.
-        if (DroppedFile(e) is { } path) BeginInvoke(() => OpenFile(path));
-    }
-
-    internal static string? DroppedFile(DragEventArgs e) =>
-        e.Data?.GetData(DataFormats.FileDrop) is string[] { Length: 1 } files &&
-        Path.GetExtension(files[0]).ToLowerInvariant() is ".xlsx" or ".xls" or ".xlsm"
-            ? files[0]
-            : null;
 
     // ----- settings, deal types, updates -----
 
-    private void ShowSettings()
+    public void ShowSettings(Form asker, OperationBatch? batch)
     {
-        using var form = new SettingsForm(_app, _work?.Batch);
-        if (form.ShowDialog(this) == DialogResult.OK) _work?.SettingsChanged();
+        using var form = new SettingsForm(App, batch);
+        if (form.ShowDialog(asker) == DialogResult.OK) App.RaiseSettingsChanged();
     }
 
-    private void ShowDealTypes()
+    // The exceptions of a client are there when it is clear which client.
+    private OperationBatch? OnlyClient()
+    {
+        var open = _windows.Values.Select(w => w.Batch).OfType<OperationBatch>().ToList();
+        return open.Select(b => b.ClientEik).Distinct().Count() == 1 ? open[0] : null;
+    }
+
+    private void ShowDealTypes(Form asker)
     {
         using var form = new DealTypesForm();
-        form.ShowDialog(this);
+        form.ShowDialog(asker);
     }
 
     private void ShowUpdates()
     {
-        if (_work is { HasUnsavedEdits: true } &&
+        if (_windows.Values.Any(w => w.HasUnsavedEdits) &&
             !Dialogs.Ask(this, "Има незаписани корекции", "При обновяване програмата се рестартира и корекциите ще се загубят.",
                 "Продължи", "Отказ", warning: true))
             return;
 
-        using var form = new UpdateForm(_app, _updates);
+        using var form = new UpdateForm(App, _updates);
         if (form.ShowDialog(this) == DialogResult.OK) RestartAfterUpdate();
     }
 
@@ -211,11 +295,11 @@ internal sealed class MainForm : AppForm
     {
         base.OnShown(e);
 
-        if (_app.LoadProblem.Length > 0)
+        if (App.LoadProblem.Length > 0)
             Dialogs.Warning(this, "Настройките не можаха да бъдат прочетени",
-                "Програмата започва със стандартните. Повреденият файл е запазен с разширение .bad.\n\n" + _app.LoadProblem);
+                "Програмата започва със стандартните. Повреденият файл е запазен с разширение .bad.\n\n" + App.LoadProblem);
 
-        if (!_app.Settings.CheckForUpdates) return;
+        if (!App.Settings.CheckForUpdates) return;
         try
         {
             var release = await _updates.FindNewerAsync();
@@ -236,15 +320,8 @@ internal sealed class MainForm : AppForm
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (e.KeyData == (Keys.Control | Keys.O))
-        {
-            e.Handled = true;
-            if (StartView.PickFile(this) is { } path) OpenFile(path);
-        }
-        else if (e.KeyData == (Keys.Control | Keys.S) && _work != null)
-        {
-            e.Handled = true;
-            _work.Save();
-        }
+        if (e.KeyData != (Keys.Control | Keys.O)) return;
+        e.Handled = true;
+        if (ExcelFiles.Pick(this) is { } path) OpenFiles([path], null, this);
     }
 }

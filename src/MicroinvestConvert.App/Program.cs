@@ -34,7 +34,8 @@ internal static class Program
         using (var main = new MainForm(app, updates))
         {
             // A file dragged onto the .exe, or opened „с програмата".
-            if (args.Length == 1 && File.Exists(args[0])) main.Shown += (_, _) => main.OpenFile(args[0]);
+            var files = args.Where(File.Exists).ToList();
+            if (files.Count > 0) main.Shown += (_, _) => main.OpenFiles(files, null, main);
             Application.Run(main);
         }
 

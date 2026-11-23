@@ -3,8 +3,9 @@ using System.Drawing.Imaging;
 using System.Windows.Forms;
 using MicroinvestConvert.App;
 using MicroinvestConvert.App.Forms;
+using MicroinvestConvert.App.Forms.Checks;
 using MicroinvestConvert.App.Updates;
-using MicroinvestConvert.Core.Rules;
+using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Source;
 
 namespace MicroinvestConvert.Tests;
@@ -58,46 +59,57 @@ public class VisualTests
         {
             Show(main);
             Shot(main, Path.Combine(folder, "start.png"));
+            main.ClientSize = new Size(main.LogicalToDeviceUnits(960), main.LogicalToDeviceUnits(540));
+            Pump();
+            Shot(main, Path.Combine(folder, "start-small.png"));
+            main.ClientSize = new Size(main.LogicalToDeviceUnits(1080), main.LogicalToDeviceUnits(640));
+
+            foreach (var kind in OperationKinds.All)
+            {
+                using var empty = new ModuleForm(main, kind, 0);
+                ShowAndShot(empty, Path.Combine(folder, $"empty-{kind}.png"));
+            }
+
             for (int i = 0; i < files.Length; i++)
             {
-                main.OpenFile(files[i]);
-                if (Scale != 1f) Find<WorkView>(main).Scale(new SizeF(Scale, Scale));
-                Pump();
-                Shot(main, Path.Combine(folder, $"file{i + 1}-documents.png"));
+                var batch = AiReader.Read(files[i]);
+                using var window = new ModuleForm(main, batch.Kind, 0);
+                window.Show(batch);
+                Show(window);
+                Shot(window, Path.Combine(folder, $"file{i + 1}-documents.png"));
 
-                var tabs = Find<TabControl>(main);
+                var work = Find<WorkView>(window);
+                var tabs = Find<TabControl>(work);
                 tabs.SelectedIndex = 1;
                 Pump();
-                Shot(main, Path.Combine(folder, $"file{i + 1}-preview.png"));
+                Shot(window, Path.Combine(folder, $"file{i + 1}-preview.png"));
                 tabs.SelectedIndex = 2;
                 Pump();
-                Shot(main, Path.Combine(folder, $"file{i + 1}-log.png"));
+                Shot(window, Path.Combine(folder, $"file{i + 1}-log.png"));
                 tabs.SelectedIndex = 0;
 
-                main.ClientSize = new Size(main.LogicalToDeviceUnits(1000), main.LogicalToDeviceUnits(640));
+                window.ClientSize = new Size(window.LogicalToDeviceUnits(1080), window.LogicalToDeviceUnits(620));
                 Pump();
-                Shot(main, Path.Combine(folder, $"file{i + 1}-small.png"));
-                main.ClientSize = new Size(main.LogicalToDeviceUnits(1360), main.LogicalToDeviceUnits(820));
-                Pump();
-            }
-        }
+                Shot(window, Path.Combine(folder, $"file{i + 1}-small.png"));
 
-        for (int i = 0; i < files.Length; i++)
-        {
-            var batch = AiReader.Read(files[i]);
-            void Reprocess() => new DocumentProcessor(app.Settings.OptionsFor(batch.ClientEik)).Process(batch);
-            Reprocess();
-            using (var form = new VatCheckForm(app, batch, Reprocess)) ShowAndShot(form, Path.Combine(folder, $"file{i + 1}-vat.png"));
-            using (var form = new AccountsForm(app, batch)) ShowAndShot(form, Path.Combine(folder, $"file{i + 1}-accounts.png"));
-            using (var form = new SettingsForm(app, batch))
-            {
-                Show(form);
-                var tabs = Find<TabControl>(form);
-                for (int t = 0; t < tabs.TabPages.Count; t++)
+                using var checks = new ChecksForm(work);
+                Show(checks);
+                var pages = Find<TabControl>(checks);
+                for (int t = 0; t < pages.TabPages.Count; t++)
                 {
-                    tabs.SelectedIndex = t;
+                    pages.SelectedIndex = t;
                     Pump();
-                    if (i == 0) Shot(form, Path.Combine(folder, $"settings-{t + 1}.png"));
+                    Shot(checks, Path.Combine(folder, $"file{i + 1}-checks-{t + 1}.png"));
+                }
+
+                using var form = new SettingsForm(app, batch);
+                Show(form);
+                var settingTabs = Find<TabControl>(form);
+                for (int t = 0; t < settingTabs.TabPages.Count && i == 0; t++)
+                {
+                    settingTabs.SelectedIndex = t;
+                    Pump();
+                    Shot(form, Path.Combine(folder, $"settings-{t + 1}.png"));
                 }
             }
         }

@@ -58,6 +58,12 @@ public sealed class LedgerLine
     /// <summary>„ДДС продавач" of the source row; 0 when the row was split.</summary>
     public decimal SellerVat { get; init; }
 
+    /// <summary>The currency of a foreign invoice; empty for the other exports.</summary>
+    public string InvoiceCurrency { get; init; } = "";
+
+    /// <summary>The total of a foreign invoice in its own currency.</summary>
+    public decimal InvoiceTotal { get; init; }
+
     // ----- chosen by the user -----
 
     /// <summary>The deal type set by hand; null = by the rules.</summary>

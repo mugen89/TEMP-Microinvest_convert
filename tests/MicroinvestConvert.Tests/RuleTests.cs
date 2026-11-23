@@ -82,9 +82,9 @@ public class PurchaseRuleTests
             .Purchase(1d, "1", 30, 0, ("W", "0%"), ("K", "609"), ("M", "-"))
             .Single();
 
-        Assert.Equal("100;50;24.5;30", doc.Amounts());
-        Assert.Equal("601/5;602;453/1;609", doc.Accounts());
-        Assert.Equal("2;2;2;3", doc.Deals());
+        Assert.Equal("100;20;50;4.5;30", doc.Amounts());
+        Assert.Equal("601/5;453/1;602;453/1;609", doc.Accounts());
+        Assert.Equal("2;2;2;2;3", doc.Deals());
     }
 
     [Fact]
@@ -157,17 +157,49 @@ public class PurchaseRuleTests
     }
 
     [Fact]
-    public void A_purchase_from_abroad_outside_the_ledger_says_that_the_protocol_is_missing()
+    public void Outside_the_ledger_is_3_by_default_and_a_supplier_from_abroad_is_asked_about()
     {
-        string Note(string id) => Sheet.Purchase(1d, "1", 100, 0, [.. NoLedger, ("AG", "ДА"), ("J", id)]).Single()
+        OperationDocument With(string id, ConverterSettings? settings = null) =>
+            Sheet.Purchase(1d, "1", 100, 0, [.. NoLedger, ("AG", "ДА"), ("J", id)]).Single(settings);
+
+        var bulgarian = With(SupplierVat);
+        Assert.Equal(("3", true, false), (bulgarian.Deals(), bulgarian.WillExport, bulgarian.HasWarnings));
+
+        var foreign = With("DE123456789");
+        Assert.Equal(("3", true), (foreign.Deals(), foreign.WillExport));
+        Assert.Contains("два пъти", foreign.Issues.Single(i => i.Code == IssueCode.ForeignNoDiary).Message);
+        Assert.True(With("12345678901").Has(IssueCode.ForeignNoDiary));   // 11 digits
+        Assert.True(With("123456780").Has(IssueCode.ForeignNoDiary));     // the wrong check digit
+
+        // The answer: 1 or 3, chosen by hand.
+        foreach (string deal in new[] { "1", "3" })
+        {
+            foreign.Lines[0].TrySet(LineField.DealType, deal, out _);
+            new DocumentProcessor(ConverterOptions.Default).Process(Sheet.Purchase(9d, "9", 1, 0).Read(), foreign);
+            Assert.Equal((deal, false), (foreign.Deals(), foreign.Has(IssueCode.ForeignNoDiary)));
+        }
+    }
+
+    [Fact]
+    public void With_1_outside_the_ledger_the_missing_protocol_is_mentioned()
+    {
+        string Note(string id) => Sheet.Purchase(1d, "1", 100, 0, [.. NoLedger, ("AG", "ДА"), ("J", id)])
+            .Single(new ConverterSettings { NoDiary = NoDiaryMode.Internal })
             .Issues.Single(i => i.Code == IssueCode.NoDiary).Message;
 
         Assert.Contains("протоколът за самоначисляване", Note("DE123456789"));
         Assert.DoesNotContain("протокол", Note(SupplierVat));
-
-        var doc = Sheet.Purchase(1d, "1", 100, 0, [.. NoLedger, ("AG", "ДА"), ("J", "DE123456789")]).Single();
-        Assert.Equal(("1", true, false), (doc.Deals(), doc.WillExport, doc.HasWarnings));   // as before: 1, and no warning
     }
+
+    [Theory]
+    [InlineData("123456786", false)]
+    [InlineData("1234567860123", false)]
+    [InlineData("8001011234", false)]          // ЕГН
+    [InlineData("999999999999999", false)]     // „няма номер"
+    [InlineData("12345678901", true)]
+    [InlineData("123456", true)]
+    public void A_number_that_cannot_be_bulgarian_is_pointed_out(string id, bool pointedOut) =>
+        Assert.Equal(pointedOut, Sheet.Purchase(1d, "1", 100, 20, ("J", id)).Single().Has(IssueCode.EikLength));
 
     [Fact]
     public void A_foreign_supplier_in_the_ledger_is_pointed_out()
@@ -311,7 +343,7 @@ public class SaleRuleTests
     {
         var doc = Sheet.Sale(1d, "1", 100, 0).Single();
         Assert.Equal("1", doc.Deals());
-        Assert.True(doc.Has(IssueCode.NoDiary));
+        Assert.True(doc.Has(IssueCode.OutsideLedger));
     }
 
     [Fact]
@@ -356,7 +388,7 @@ public class DocumentRuleTests
             .Purchase(1d, "1", 100, 20)
             .Purchase(1d, "1", 15, 3, ("K", "602"), ("M", "1"))
             .Single();
-        Assert.Equal(("100;25;25", "601/5;602/1;453/1"), (doc.Amounts(), doc.Accounts()));
+        Assert.Equal(("100;20;25;5", "601/5;453/1;602/1;453/1"), (doc.Amounts(), doc.Accounts()));
     }
 
     [Fact]
@@ -394,13 +426,34 @@ public class DocumentRuleTests
     }
 
     [Fact]
-    public void Vat_can_follow_every_account()
+    public void Vat_follows_every_account_or_is_one_amount()
     {
-        var doc = Purchases
+        var sheet = Purchases
             .Purchase(1d, "1", 100, 20)
-            .Purchase(1d, "1", 10, 2, ("K", "602"), ("M", "1"))
-            .Single(new ConverterSettings { VatLines = VatLines.PerAccount });
+            .Purchase(1d, "1", 10, 2, ("K", "602"), ("M", "1"));
+        var doc = sheet.Single();
         Assert.Equal(("100;20;10;2", "601/5;453/1;602/1;453/1"), (doc.Amounts(), doc.Accounts()));
+
+        var total = sheet.Single(new ConverterSettings { VatLines = VatLines.PerDealType });
+        Assert.Equal(("100;10;22", "601/5;602/1;453/1"), (total.Amounts(), total.Accounts()));
+    }
+
+    [Fact]
+    public void Vat_split_over_the_accounts_adds_up_to_the_vat_of_the_document()
+    {
+        // 3 × 0.333 = 0.999 → 1.00, while 3 × 0.33 = 0.99
+        var sheet = Sales
+            .Sale(1d, "1", 1.665m, 0.333m, ("M", "1"), ("AB", 1.665d), ("AC", 0.333d))
+            .Sale(1d, "1", 1.665m, 0.333m, ("M", "2"), ("AB", 1.665d), ("AC", 0.333d))
+            .Sale(1d, "1", 1.665m, 0.333m, ("M", "3"), ("AB", 1.665d), ("AC", 0.333d));
+        var doc = sheet.Single();
+        var total = sheet.Single(new ConverterSettings { VatLines = VatLines.PerDealType });
+
+        Assert.Equal(1.00m, doc.TotalVat);
+        Assert.Equal((total.TotalBase, total.TotalVat, total.TotalGross), (doc.TotalBase, doc.TotalVat, doc.TotalGross));
+        Assert.Equal(5.99m, doc.TotalGross);   // 5.994
+        Assert.Equal(6, doc.Segments.Count);
+        Assert.Equal(4, total.Segments.Count);
     }
 
     [Fact]
@@ -423,7 +476,7 @@ public class DocumentRuleTests
             .Sale(1d, "1", 10.004m, 2, ("M", "1"), ("AB", 10.004d), ("AC", 2d))
             .Sale(1d, "1", 10.004m, 2, ("M", "2"), ("AB", 10.004d), ("AC", 2d))
             .Single();
-        Assert.Equal("10.01;10;4", doc.Amounts());
+        Assert.Equal("10.01;2;10;2", doc.Amounts());
     }
 
     [Fact]
@@ -449,7 +502,7 @@ public class DocumentRuleTests
             .Purchase(1d, "1", 1000, 200, ("K", "304"), ("M", "-"))
             .Purchase(1d, "1", -200, -40, ("K", "402"), ("M", "-"))
             .Single();
-        Assert.Equal(("1000;-200;160", "304;402;453/1"), (doc.Amounts(), doc.Accounts()));
+        Assert.Equal(("1000;200;-200;-40", "304;453/1;402;453/1"), (doc.Amounts(), doc.Accounts()));
     }
 
     [Fact]

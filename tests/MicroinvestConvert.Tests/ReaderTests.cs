@@ -47,10 +47,25 @@ public class AiFileTests
     }
 
     [Fact]
-    public void A_foreign_export_is_refused_with_a_reason()
+    public void The_foreign_export_is_recognised_by_its_two_columns()
+    {
+        var file = Detect(new TestSheet(Layout.Foreign).Invoice(1d, "INV-1", 10, "EUR", 10));
+        Assert.Equal((OperationKind.Foreign, "Експорт Чуждестранни"), (file.Kind, file.LayoutName));
+        Assert.Equal(OperationKind.Foreign, Detect(new TestSheet(Layout.Foreign).Invoice(1d, "INV-1", 10, "EUR", 10), "Sheet1").Kind);
+    }
+
+    [Fact]
+    public void A_foreign_sheet_with_other_columns_is_refused_and_not_read_shifted()
     {
         var ex = Assert.Throws<ConvertException>(() => Detect(new TestSheet(Layout.Purchases).Purchase(1d, "1", 100, 20), "Експорт Чуждестранни"));
-        Assert.Contains("Чуждестранни", ex.Message);
+        Assert.Contains("колоните му не са очакваните", ex.Message);
+    }
+
+    [Fact]
+    public void An_export_of_protocols_is_refused_with_a_reason()
+    {
+        var ex = Assert.Throws<ConvertException>(() => Detect(new TestSheet(Layout.Purchases).Purchase(1d, "1", 100, 20), "Протоколи"));
+        Assert.Contains("протоколи", ex.Message);
     }
 
     [Fact]
@@ -150,7 +165,7 @@ public class AiReaderTests
     {
         var doc = new TestSheet(Layout.Purchases).Purchase(1d, "1", 10, 2, ("AL", "-")).Read().Documents[0];
         Assert.Equal("Разходи за материали", doc.Reason);
-        Assert.Contains(doc.ReadIssues, i => i.Code == IssueCode.MissingReason);
+        Assert.Contains(doc.ReadIssues, i => i.Code == IssueCode.ReasonFromAccount);
     }
 
     [Fact]

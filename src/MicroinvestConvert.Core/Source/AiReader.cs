@@ -51,7 +51,7 @@ public static partial class AiReader
             // Rows of one document repeat its header. The number is part of the key, so two
             // files pasted one under the other (the same № twice) stay separate documents.
             string key = string.Join('|', index, CellValues.Norm(sheet.Cell(r, C.DocType)).ToLowerInvariant(),
-                number, CellValues.Norm(sheet.Cell(r, C.PartnerId)));
+                number, PartnerIdOf(file, r));
             if (number.Length == 0 && index == previousIndex) key = previousKey;
 
             if (!byKey.TryGetValue(key, out var doc))
@@ -61,8 +61,12 @@ public static partial class AiReader
                 batch.Documents.Add(doc);
             }
 
-            if (file.Kind == OperationKind.Purchase) ReadPurchaseRow(file, r, doc);
-            else ReadSaleRow(file, r, doc);
+            switch (file.Kind)
+            {
+                case OperationKind.Purchase: ReadPurchaseRow(file, r, doc); break;
+                case OperationKind.Foreign: ReadForeignRow(file, r, doc); break;
+                default: ReadSaleRow(file, r, doc); break;
+            }
 
             previousKey = key;
             previousIndex = index;
@@ -84,16 +88,12 @@ public static partial class AiReader
     private static OperationDocument ReadHeader(AiFile file, int row, string index)
     {
         var sheet = file.Sheet;
+        var columns = file.Columns;
         string Text(int column) => CellValues.Norm(sheet.Cell(row, column));
 
         string rawType = Text(C.DocType);
         int? code = CellValues.Integer(sheet.Cell(row, C.DocCode));
-        string partnerId = Text(C.PartnerId);
-        var partner = PartnerIdentity.Parse(partnerId);
-
-        bool purchase = file.Kind == OperationKind.Purchase;
-        int payment = purchase ? C.Purchase.Payment : file.Sales!.Payment;
-        int counter = purchase ? C.Purchase.CounterAccount : file.Sales!.CounterAccount;
+        var partner = PartnerOf(file, row);
 
         var doc = new OperationDocument
         {
@@ -101,26 +101,45 @@ public static partial class AiReader
             Index = index,
             SourceDocType = rawType,
             SourceDocCode = code,
-            PartnerId = partnerId,
+            PartnerId = PartnerIdOf(file, row),
             DocType = DocumentTypes.FromSource(rawType, code),
             Date = CellValues.Date(sheet.Cell(row, C.DocDate)),
             Period = CellValues.Period(sheet.Cell(row, C.TaxPeriod)),
             PartnerName = Text(C.PartnerName),
             Eik = partner.Eik,
             VatNumber = partner.VatNumber,
-            Currency = BookCurrency.Normalise(Text(C.Currency)),
-            Payment = PaymentMethods.FromText(Text(payment)),
-            CounterAccount = Text(counter),
+            // The amounts of the foreign export are taken from its column in EUR.
+            Currency = file.Kind == OperationKind.Foreign ? BookCurrency.Euro : BookCurrency.Normalise(Text(columns.Currency)),
+            Payment = PaymentMethods.FromText(Text(columns.Payment)),
+            CounterAccount = Text(columns.CounterAccount),
         };
 
         doc.Number = ReadNumber(sheet.Cell(row, C.DocNumber), doc);
 
         var byText = DocumentTypes.Find(rawType);
         if (byText != null && code is 1 or 2 or 3 && byText.ShortName != DocumentTypes.FromSource("", code))
-            doc.ReadIssues.Add(new Issue(IssueSeverity.Warning, IssueCode.DocumentTypeConflict,
+            doc.ReadIssues.Add(new Issue(IssueCode.DocumentTypeConflict,
                 $"Видът „{rawType}“ и кодът {code} в кол. C не съвпадат – взет е „{byText.ShortName}“."));
 
         return doc;
+    }
+
+    // The foreign export has the ЕИК and the VAT number apart, the others in one cell.
+    private static string PartnerIdOf(AiFile file, int row)
+    {
+        string id = CellValues.Norm(file.Sheet.Cell(row, C.PartnerId));
+        if (file.Columns.VatId < 0) return id;
+        string vat = CellValues.Norm(file.Sheet.Cell(row, file.Columns.VatId));
+        return id.Length == 0 ? vat : vat.Length == 0 ? id : id + " / " + vat;
+    }
+
+    private static PartnerIdentity PartnerOf(AiFile file, int row)
+    {
+        var id = PartnerIdentity.Parse(CellValues.Norm(file.Sheet.Cell(row, C.PartnerId)));
+        if (file.Columns.VatId < 0) return id;
+
+        var vat = PartnerIdentity.Parse(CellValues.Norm(file.Sheet.Cell(row, file.Columns.VatId)));
+        return new PartnerIdentity(id.Eik.Length > 0 ? id.Eik : vat.Eik, vat.VatNumber.Length > 0 ? vat.VatNumber : id.VatNumber);
     }
 
     // Excel drops the leading zeros of a number typed as a number: 9679 was 0000009679.
@@ -131,7 +150,7 @@ public static partial class AiReader
         if (doc.DocType is not (DocumentTypes.Invoice or DocumentTypes.DebitNote or DocumentTypes.CreditNote)) return number;
 
         string padded = number.PadLeft(10, '0');
-        doc.ReadIssues.Add(new Issue(IssueSeverity.Info, IssueCode.PaddedNumber,
+        doc.ReadIssues.Add(new Issue(IssueCode.PaddedNumber,
             $"Номерът в клетката е число ({number}) – допълнен е до 10 знака: {padded}."));
         return padded;
     }
@@ -141,19 +160,20 @@ public static partial class AiReader
     private static void ReadPurchaseRow(AiFile file, int row, OperationDocument doc)
     {
         var sheet = file.Sheet;
+        var columns = file.Columns;
         decimal Amount(int column) => CellValues.NumberOrZero(sheet.Cell(row, column));
         string Text(int column) => CellValues.Norm(sheet.Cell(row, column));
 
-        string treatment = Text(C.Treatment);
-        decimal gross = Gross(sheet, row);
-        bool noDiary = IsYes(Text(C.Purchase.NoDiary));
+        string treatment = Text(columns.Treatment);
+        decimal gross = Gross(file, row);
+        bool noDiary = IsYes(Text(columns.NoDiary));
 
         var parts = new List<(LedgerBucket Bucket, decimal Base, decimal Vat)>();
-        if (Amount(C.Purchase.NoCredit) is var none && none != 0m)
+        if (Amount(columns.NoCredit) is var none && none != 0m)
             parts.Add((LedgerBucket.PurchaseNoCredit, none, 0m));
-        if (Amount(C.Purchase.FullBase) is var fb && Amount(C.Purchase.FullVat) is var fv && (fb != 0m || fv != 0m))
+        if (Amount(columns.FullBase) is var fb && Amount(columns.FullVat) is var fv && (fb != 0m || fv != 0m))
             parts.Add((LedgerBucket.PurchaseFullCredit, fb, fv));
-        if (Amount(C.Purchase.PartialBase) is var pb && Amount(C.Purchase.PartialVat) is var pv && (pb != 0m || pv != 0m))
+        if (Amount(columns.PartialBase) is var pb && Amount(columns.PartialVat) is var pv && (pb != 0m || pv != 0m))
             parts.Add((LedgerBucket.PurchasePartialCredit, pb, pv));
 
         LedgerBucket byTreatment = PurchaseBucketOf(treatment);
@@ -166,7 +186,7 @@ public static partial class AiReader
         else if (noDiary || (parts.Count == 0 && byTreatment == LedgerBucket.PurchaseNoDiary))
         {
             if (parts.Count > 0)
-                AddOnce(doc.ReadIssues, new Issue(IssueSeverity.Warning, IssueCode.NoDiary,
+                AddOnce(doc.ReadIssues, new Issue(IssueCode.NoDiaryWithAmounts,
                     "Отбелязан е „без ДДС дневник“, а има суми в колоните за дневника – взето е „без дневник“."));
             parts = [(LedgerBucket.PurchaseNoDiary, gross, 0m)];
         }
@@ -174,22 +194,56 @@ public static partial class AiReader
         {
             parts.Add(gross == 0m
                 ? (byTreatment, 0m, 0m)
-                : (LedgerBucket.PurchaseUnspecified, Amount(C.SellerBase) != 0m || Amount(C.SellerVat) != 0m
-                    ? Amount(C.SellerBase)
-                    : gross, Amount(C.SellerVat)));
+                : (LedgerBucket.PurchaseUnspecified, Amount(columns.SellerBase) != 0m || Amount(columns.SellerVat) != 0m
+                    ? Amount(columns.SellerBase)
+                    : gross, Amount(columns.SellerVat)));
         }
 
         AddLines(file, row, doc, parts, gross, "");
     }
 
+    /// <summary>
+    /// A row of the foreign export: one amount, in EUR. The columns of the seller are in the
+    /// currency of the invoice; without the EUR column the document waits for its amounts.
+    /// </summary>
+    private static void ReadForeignRow(AiFile file, int row, OperationDocument doc)
+    {
+        var sheet = file.Sheet;
+        var columns = file.Columns;
+        decimal Amount(int column) => CellValues.NumberOrZero(sheet.Cell(row, column));
+        string Text(int column) => CellValues.Norm(sheet.Cell(row, column));
+
+        string currency = BookCurrency.Normalise(Text(columns.Currency));
+        if (currency.Length == 0) currency = BookCurrency.Euro;
+        decimal inCurrency = Gross(file, row);
+        decimal inEuro = Amount(columns.EuroTotal);
+
+        if (inEuro == 0m && inCurrency != 0m)
+        {
+            inEuro = inCurrency;   // in EUR it is the amount; otherwise it is asked for
+            if (currency != BookCurrency.Euro) doc.Currency = currency;
+        }
+
+        if (!IsYes(Text(columns.NoDiary)) ||
+            new[] { columns.NoCredit, columns.FullBase, columns.FullVat, columns.PartialBase, columns.PartialVat }.Any(c => Amount(c) != 0m))
+            AddOnce(doc.ReadIssues, new Issue(IssueCode.NotMarkedNoDiary,
+                "Във файла документът не е „без ДДС дневник“ – записва се само фактурата, с вид сделка 1."));
+
+        if (Amount(columns.SellerVat) is var sellerVat && sellerVat != 0m)
+            AddOnce(doc.ReadIssues, new Issue(IssueCode.SellerVatIncluded,
+                $"Във фактурата има ДДС на доставчика ({RuleText.Money(sellerVat)} {currency}) – влиза в стойността."));
+
+        AddLines(file, row, doc, [(LedgerBucket.Foreign, inEuro, 0m)], inEuro, "", currency, inCurrency);
+    }
+
     private static void ReadSaleRow(AiFile file, int row, OperationDocument doc)
     {
         var sheet = file.Sheet;
-        var layout = file.Sales!;
+        var columns = file.Columns;
         decimal Amount(int column) => column < 0 ? 0m : CellValues.NumberOrZero(sheet.Cell(row, column));
         string Text(int column) => CellValues.Norm(sheet.Cell(row, column));
 
-        decimal gross = Gross(sheet, row);
+        decimal gross = Gross(file, row);
         var parts = new List<(LedgerBucket Bucket, decimal Base, decimal Vat)>();
 
         void Add(LedgerBucket bucket, decimal @base, decimal vat = 0m)
@@ -197,34 +251,36 @@ public static partial class AiReader
             if (@base != 0m || vat != 0m) parts.Add((bucket, @base, vat));
         }
 
-        Add(LedgerBucket.Sale20, Amount(C.Sales.Base20), Amount(C.Sales.Vat20));
-        Add(LedgerBucket.Sale9, Amount(C.Sales.Base9), Amount(C.Sales.Vat9));
-        Add(LedgerBucket.SaleIntraCommunity, Amount(C.Sales.IntraCommunity));
-        Add(LedgerBucket.SaleExport, Amount(C.Sales.Export));
-        Add(LedgerBucket.SaleArticles140, Amount(layout.Articles140));
-        Add(LedgerBucket.SaleUntaxedEu, Amount(layout.UntaxedEu));
-        Add(LedgerBucket.SaleUntaxedNonEu, Amount(layout.UntaxedNonEu));
-        Add(LedgerBucket.SaleExempt, Amount(layout.Exempt));
+        Add(LedgerBucket.Sale20, Amount(C.Base20), Amount(C.Vat20));
+        Add(LedgerBucket.Sale9, Amount(C.Base9), Amount(C.Vat9));
+        Add(LedgerBucket.SaleIntraCommunity, Amount(C.IntraCommunity));
+        Add(LedgerBucket.SaleExport, Amount(C.Export));
+        Add(LedgerBucket.SaleArticles140, Amount(columns.Articles140));
+        Add(LedgerBucket.SaleUntaxedEu, Amount(columns.UntaxedEu));
+        Add(LedgerBucket.SaleUntaxedNonEu, Amount(columns.UntaxedNonEu));
+        Add(LedgerBucket.SaleExempt, Amount(columns.Exempt));
 
         if (parts.Count == 0)
             parts.Add(gross == 0m
-                ? (SaleBucketOf(Text(C.Treatment)), 0m, 0m)
-                : (LedgerBucket.SaleNoDiary, gross - Amount(C.SellerVat), Amount(C.SellerVat)));
+                ? (SaleBucketOf(Text(columns.Treatment)), 0m, 0m)
+                : (LedgerBucket.SaleNoDiary, gross - Amount(columns.SellerVat), Amount(columns.SellerVat)));
 
-        AddLines(file, row, doc, parts, gross, Text(C.Sales.JournalCell));
+        AddLines(file, row, doc, parts, gross, Text(C.JournalCell));
     }
 
     private static void AddLines(AiFile file, int row, OperationDocument doc,
-        List<(LedgerBucket Bucket, decimal Base, decimal Vat)> parts, decimal gross, string journalCell)
+        List<(LedgerBucket Bucket, decimal Base, decimal Vat)> parts, decimal gross, string journalCell,
+        string currency = "", decimal inCurrency = 0m)
     {
         var sheet = file.Sheet;
+        var columns = file.Columns;
         string Text(int column) => CellValues.Norm(sheet.Cell(row, column));
 
         if (parts.Count > 1)
-            AddOnce(doc.ReadIssues, new Issue(IssueSeverity.Info, IssueCode.MixedRow,
+            AddOnce(doc.ReadIssues, new Issue(IssueCode.MixedRow,
                 $"Ред {row + 1} има суми в няколко колони за дневника – разделен е на {parts.Count} части."));
 
-        decimal sellerVat = CellValues.NumberOrZero(sheet.Cell(row, C.SellerVat));
+        decimal sellerVat = CellValues.NumberOrZero(sheet.Cell(row, columns.SellerVat));
         bool first = true;
         foreach (var (bucket, @base, vat) in parts)
         {
@@ -232,19 +288,21 @@ public static partial class AiReader
             {
                 SourceRow = row + 1,
                 Bucket = bucket,
-                Account = Text(C.Account),
-                AccountName = Text(C.AccountName),
-                Analytic = Text(C.Analytic),
-                AnalyticName = Text(C.AnalyticName),
-                Article = Text(C.Article),
+                Account = Text(columns.Account),
+                AccountName = Text(columns.AccountName),
+                Analytic = Text(columns.Analytic),
+                AnalyticName = Text(columns.AnalyticName),
+                Article = Text(columns.Article),
                 Base = @base,
                 Vat = vat,
-                RateText = Text(C.SellerRate),
-                DeclaredRate = VatRates.ParseRate(sheet.Cell(row, C.SellerRate)),
-                Treatment = Text(C.Treatment),
+                RateText = Text(columns.SellerRate),
+                DeclaredRate = VatRates.ParseRate(sheet.Cell(row, columns.SellerRate)),
+                Treatment = Text(columns.Treatment),
                 JournalCell = journalCell,
                 SellerTotal = first ? gross : 0m,
                 SellerVat = parts.Count == 1 ? sellerVat : 0m,
+                InvoiceCurrency = currency,
+                InvoiceTotal = inCurrency,
             });
             first = false;
         }
@@ -254,49 +312,43 @@ public static partial class AiReader
 
     private static void Complete(AiFile file, OperationDocument doc)
     {
-        bool purchase = file.Kind == OperationKind.Purchase;
-        int operation = purchase ? C.Purchase.OperationName : file.Sales!.OperationName;
-        int cashOperation = purchase ? C.Purchase.CashOperationName : file.Sales!.CashOperationName;
-        int cash = purchase ? C.Purchase.CashAccount : file.Sales!.CashAccount;
-        int counter = purchase ? C.Purchase.CounterAccount : file.Sales!.CounterAccount;
-        int comment = purchase ? C.Purchase.Comment : file.Sales!.Comment;
+        var columns = file.Columns;
 
         // Header texts may be filled on some rows of the document only.
         string FirstText(int column) => doc.Lines
             .Select(l => CellValues.Norm(file.Sheet.Cell(l.SourceRow - 1, column)))
             .FirstOrDefault(t => t.Length > 0) ?? "";
 
-        doc.CashAccount = FirstText(cash);
-        if (doc.CounterAccount.Length == 0) doc.CounterAccount = FirstText(counter);
-        doc.CashReason = FirstText(cashOperation);
-        doc.Note = FirstText(comment);
+        doc.CashAccount = FirstText(columns.CashAccount);
+        if (doc.CounterAccount.Length == 0) doc.CounterAccount = FirstText(columns.CounterAccount);
+        doc.CashReason = FirstText(columns.CashOperationName);
+        doc.Note = FirstText(columns.Comment);
 
         // The operation of the largest account names the whole document.
         var biggest = doc.Lines.GroupBy(l => l.AccountKey)
             .OrderByDescending(g => Math.Abs(g.Sum(l => l.Gross)))
             .First();
         doc.Reason = biggest
-            .Select(l => CellValues.Norm(file.Sheet.Cell(l.SourceRow - 1, operation)))
-            .FirstOrDefault(t => t.Length > 0) ?? FirstText(operation);
+            .Select(l => CellValues.Norm(file.Sheet.Cell(l.SourceRow - 1, columns.OperationName)))
+            .FirstOrDefault(t => t.Length > 0) ?? FirstText(columns.OperationName);
 
         if (doc.Reason.Length == 0)
         {
             doc.Reason = biggest.Select(l => l.AccountName).FirstOrDefault(t => t.Length > 0)
                 ?? biggest.Select(l => l.Article).FirstOrDefault(t => t.Length > 0) ?? "";
             if (doc.Reason.Length > 0)
-                doc.ReadIssues.Add(new Issue(IssueSeverity.Info, IssueCode.MissingReason,
+                doc.ReadIssues.Add(new Issue(IssueCode.ReasonFromAccount,
                     "Във файла няма име на операция – основанието е името на сметката."));
         }
     }
 
     // ----- helpers -----
 
-    private static decimal Gross(SheetData sheet, int row)
+    private static decimal Gross(AiFile file, int row)
     {
-        decimal total = CellValues.NumberOrZero(sheet.Cell(row, C.SellerTotal));
-        return total != 0m
-            ? total
-            : CellValues.NumberOrZero(sheet.Cell(row, C.SellerBase)) + CellValues.NumberOrZero(sheet.Cell(row, C.SellerVat));
+        decimal Amount(int column) => CellValues.NumberOrZero(file.Sheet.Cell(row, column));
+        decimal total = Amount(file.Columns.SellerTotal);
+        return total != 0m ? total : Amount(file.Columns.SellerBase) + Amount(file.Columns.SellerVat);
     }
 
     private static bool IsYes(string text) => text.Equals("да", StringComparison.OrdinalIgnoreCase);

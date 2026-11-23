@@ -21,17 +21,31 @@ public sealed class DocumentProcessor
         Rates = new VatRates(options.General);
     }
 
-    public void Process(OperationBatch batch)
-    {
-        foreach (var doc in batch.Documents) ProcessOne(doc);
-        MarkDuplicates(batch);
-    }
+    public void Process(OperationBatch batch) => Process(batch, batch.Documents);
 
     /// <summary>After a correction of one document of the batch.</summary>
-    public void Process(OperationBatch batch, OperationDocument doc)
+    public void Process(OperationBatch batch, OperationDocument doc) => Process(batch, [doc]);
+
+    /// <summary>After a correction of some documents of the batch.</summary>
+    public void Process(OperationBatch batch, IReadOnlyCollection<OperationDocument> documents)
     {
-        ProcessOne(doc);
+        foreach (var doc in documents) ProcessOne(doc);
+
+        // What one document says about another changes with any of them.
+        foreach (var doc in batch.Documents)
+            doc.Issues.RemoveAll(i => i.Code is IssueCode.Duplicate or IssueCode.EuroRate);
         MarkDuplicates(batch);
+        if (batch.Kind == OperationKind.Foreign) ForeignRules.CheckRates(batch);
+
+        foreach (var doc in batch.Documents) ApplyChecks(doc);
+    }
+
+    // Checks the user switched off are not there; what the user ticked off is marked.
+    private void ApplyChecks(OperationDocument doc)
+    {
+        doc.Issues.RemoveAll(i => Options.General.IsOff(i.Code));
+        for (int i = 0; i < doc.Issues.Count; i++)
+            doc.Issues[i] = doc.Issues[i] with { Reviewed = doc.IsReviewed(doc.Issues[i]) };
     }
 
     private void ProcessOne(OperationDocument doc)
@@ -43,9 +57,12 @@ public sealed class DocumentProcessor
         ResolveDate(doc);
         CheckCurrency(doc);
 
-        doc.VatGroups = doc.Kind == OperationKind.Purchase
-            ? PurchaseRules.Classify(doc, Options, Rates)
-            : SaleRules.Classify(doc, Rates);
+        doc.VatGroups = doc.Kind switch
+        {
+            OperationKind.Purchase => PurchaseRules.Classify(doc, Options, Rates),
+            OperationKind.Foreign => ForeignRules.Classify(doc),
+            _ => SaleRules.Classify(doc, Rates),
+        };
 
         doc.SkippedBySetting = Options.General.NoDiary == NoDiaryMode.Skip &&
                                doc.Lines.Count > 0 &&
@@ -56,7 +73,7 @@ public sealed class DocumentProcessor
         CheckTotals(doc);
 
         if (doc.Lines.Any(l => l.DealTypeOverride != null && l.DealTypeOverride != l.AutoDealType))
-            doc.Issues.Add(new Issue(IssueSeverity.Info, IssueCode.Overridden, "Видът сделка е зададен ръчно."));
+            doc.Issues.Add(new Issue(IssueCode.Overridden, "Видът сделка е зададен ръчно."));
     }
 
     // ----- header -----
@@ -64,19 +81,25 @@ public sealed class DocumentProcessor
     private static void CheckIdentity(OperationDocument doc)
     {
         if (doc.DocType.Length == 0)
-            doc.Issues.Add(new Issue(IssueSeverity.Error, IssueCode.MissingDocumentType,
+            doc.Issues.Add(new Issue(IssueCode.MissingDocumentType,
                 doc.SourceDocType.Length > 0
                     ? $"Непознат вид документ „{doc.SourceDocType}“ – изберете тип."
                     : "Липсва вид на документа – изберете тип."));
         if (doc.Number.Length == 0)
-            doc.Issues.Add(new Issue(IssueSeverity.Error, IssueCode.MissingNumber, "Липсва номер на документ."));
+            doc.Issues.Add(new Issue(IssueCode.MissingNumber, "Липсва номер на документ."));
         if (doc.PartnerName.Length == 0)
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.MissingPartner, "Липсва име на контрагент."));
+            doc.Issues.Add(new Issue(IssueCode.MissingPartner, "Липсва име на контрагент."));
         if (doc.Reason.Length == 0)
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.MissingReason, "Липсва основание."));
+            doc.Issues.Add(new Issue(IssueCode.MissingReason, "Липсва основание."));
+
+        // A foreign company has a number of its own.
+        if (doc.Kind == OperationKind.Foreign) return;
         if (!PartnerIdentity.HasValidEikCheckDigit(doc.Eik))
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.EikCheckDigit,
+            doc.Issues.Add(new Issue(IssueCode.EikCheckDigit,
                 $"ЕИК {doc.Eik} не минава контролната проверка – сгрешена цифра или номер на чужда фирма."));
+        else if (!PartnerIdentity.HasPossibleLength(doc.Eik))
+            doc.Issues.Add(new Issue(IssueCode.EikLength,
+                $"Номерът {doc.Eik} е с {doc.Eik.Length} цифри – ЕИК е с 9 или 13, ЕГН с 10. Обикновено е на чужда фирма."));
     }
 
     private void ResolveDate(OperationDocument doc)
@@ -84,7 +107,7 @@ public sealed class DocumentProcessor
         doc.AccountingDate = null;
         if (doc.Date is not { } date)
         {
-            doc.Issues.Add(new Issue(IssueSeverity.Error, IssueCode.MissingDate, "Липсва дата на документа."));
+            doc.Issues.Add(new Issue(IssueCode.MissingDate, "Липсва дата на документа."));
             return;
         }
 
@@ -92,7 +115,7 @@ public sealed class DocumentProcessor
         {
             doc.AccountingDate = chosen;
             if (chosen < date)
-                doc.Issues.Add(new Issue(IssueSeverity.Error, IssueCode.PeriodBeforeDocument,
+                doc.Issues.Add(new Issue(IssueCode.PeriodBeforeDocument,
                     $"Счетоводната дата {chosen:dd.MM.yyyy} е преди датата на документа {date:dd.MM.yyyy}."));
             return;
         }
@@ -104,13 +127,13 @@ public sealed class DocumentProcessor
         }
 
         if (doc.Period == null)
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.MissingPeriod,
+            doc.Issues.Add(new Issue(IssueCode.MissingPeriod,
                 "Липсва данъчен период (кол. H) – счетоводната дата е датата на документа."));
 
         var resolved = AccountingDates.Resolve(date, doc.Period);
         doc.AccountingDate = resolved.Date;
         if (resolved.AfterPeriod)
-            doc.Issues.Add(new Issue(IssueSeverity.Error, IssueCode.PeriodBeforeDocument,
+            doc.Issues.Add(new Issue(IssueCode.PeriodBeforeDocument,
                 $"Данъчният период {doc.Period:MM.yyyy} е преди месеца на документа ({date:dd.MM.yyyy}). " +
                 "Поправете периода или датата, или включете „Сч. дата = дата на документа“."));
     }
@@ -120,17 +143,19 @@ public sealed class DocumentProcessor
         if (doc.Currency.Length == 0 || doc.Date is not { } date) return;
 
         string book = BookCurrency.On(date);
-        if (doc.Currency != book)
-            doc.Issues.Add(new Issue(IssueSeverity.Error, IssueCode.ForeignCurrency,
-                $"Сумите са в {doc.Currency}, а не в {book}. Превалутирането ще бъде добавено в следваща версия. " +
-                $"Ако сте поправили сумите, сменете валутата на {book}."));
+        if (doc.Currency == book) return;
+
+        doc.Issues.Add(new Issue(IssueCode.ForeignCurrency, doc.Kind == OperationKind.Foreign && doc.Currency != BookCurrency.Euro
+            ? $"Липсва обща сума в евро (кол. AI) – сумите са в {doc.Currency}. Въведете ги в {book} и сменете валутата на {book}."
+            : $"Сумите са в {doc.Currency}, а не в {book}. Превалутирането ще бъде добавено в следваща версия. " +
+              $"Ако сте поправили сумите, сменете валутата на {book}."));
     }
 
     // ----- accounts -----
 
     private void ResolveAccounts(OperationDocument doc)
     {
-        bool purchase = doc.Kind == OperationKind.Purchase;
+        bool purchase = doc.Kind.IsPurchaseSide();
 
         doc.CounterAccountOut = AccountCodes.Format(doc.CounterAccount, "", Options);
         CheckAccount(doc, doc.CounterAccountOut, IssueCode.MissingCounterAccount,
@@ -156,8 +181,8 @@ public sealed class DocumentProcessor
         if (problem == null) return;
 
         doc.Issues.Add(account.Length == 0
-            ? new Issue(IssueSeverity.Error, missing, $"Липсва {what}.")
-            : new Issue(IssueSeverity.Error, IssueCode.BadAccount, $"Неправилна сметка „{account}“ – {problem} ({what})."));
+            ? new Issue(missing, $"Липсва {what}.")
+            : new Issue(IssueCode.BadAccount, $"Неправилна сметка „{account}“ – {problem} ({what})."));
     }
 
     // ----- columns A, B, N, O -----
@@ -196,13 +221,13 @@ public sealed class DocumentProcessor
         decimal sign = creditNote && gross > 0m ? -1m : 1m;
 
         if (sign < 0m)
-            doc.Issues.Add(new Issue(IssueSeverity.Info, IssueCode.SignFlipped,
+            doc.Issues.Add(new Issue(IssueCode.SignFlipped,
                 "Кредитно известие с положителни суми – записват се с минус."));
         else if (!creditNote && gross < 0m)
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.NegativeDocument,
+            doc.Issues.Add(new Issue(IssueCode.NegativeDocument,
                 $"Общата сума е отрицателна ({Money(gross)}), а документът не е кредитно известие."));
 
-        string vatAccount = doc.Kind == OperationKind.Purchase ? Options.PurchaseVatAccount : Options.SaleVatAccount;
+        string vatAccount = doc.Kind.IsPurchaseSide() ? Options.PurchaseVatAccount : Options.SaleVatAccount;
         var segments = new List<EntrySegment>();
 
         foreach (var deal in Ordered(doc.Lines, l => l.DealType))
@@ -233,7 +258,7 @@ public sealed class DocumentProcessor
         if (doc.Kind == OperationKind.Sale)
         {
             if (doc.ViesOverride == null && segments.Select(s => s.Vies).Distinct().Count() > 1)
-                doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.ViesMixed,
+                doc.Issues.Add(new Issue(IssueCode.ViesMixed,
                     "Сумите имат различен VIES – в кол. O се записва по една стойност за всяка сума. Проверете как го приема Делта Pro."));
         }
     }
@@ -269,19 +294,29 @@ public sealed class DocumentProcessor
 
     internal static decimal Cents(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
-    // Every amount is rounded on its own, so with more than two decimals in the file the sum
-    // can drift off the total of the document. The rounded-off amounts — and only they — give
-    // or take a cent until it fits: first the ones rounded the other way, bases before VAT.
+    // Every amount is rounded on its own, so with more than two decimals in the file the sums
+    // can drift. First the VAT of a deal type, which may be split over its accounts, comes to
+    // what it is as one amount; then the bases, until the document adds up to its total.
     private static void RoundSegments(List<EntrySegment> segments)
     {
-        decimal residual = Cents(segments.Sum(s => s.Raw)) - segments.Sum(s => s.Amount);
+        foreach (var vat in segments.Where(s => s.IsVat).GroupBy(s => s.DealType))
+            Balance(vat.ToList(), Cents(vat.Sum(s => s.Raw)));
+
+        Balance(segments.Where(s => !s.IsVat).ToList(),
+            Cents(segments.Sum(s => s.Raw)) - segments.Where(s => s.IsVat).Sum(s => s.Amount));
+    }
+
+    // The rounded-off amounts — and only they — give or take a cent until they add up: first the
+    // ones rounded the other way.
+    private static void Balance(List<EntrySegment> segments, decimal total)
+    {
+        decimal residual = total - segments.Sum(s => s.Amount);
         if (residual == 0m) return;
 
         decimal step = residual > 0m ? 0.01m : -0.01m;
         var candidates = segments
             .Where(s => s.Raw != s.Amount)
-            .OrderBy(s => s.IsVat)
-            .ThenBy(s => Math.Sign(s.Raw - s.Amount) == Math.Sign(residual) ? 0 : 1)
+            .OrderBy(s => Math.Sign(s.Raw - s.Amount) == Math.Sign(residual) ? 0 : 1)
             .ThenByDescending(s => Math.Abs(s.Raw - s.Amount))
             .ToList();
 
@@ -300,27 +335,25 @@ public sealed class DocumentProcessor
         decimal inLedger = doc.Lines.Sum(l => l.Gross);
         decimal inFile = doc.Lines.Sum(l => l.SellerTotal);
 
-        if (Math.Abs(inLedger - inFile) > 0.01m)
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.AmountsDoNotAdd,
+        if (doc.Kind != OperationKind.Foreign && Math.Abs(inLedger - inFile) > 0.01m)
+            doc.Issues.Add(new Issue(IssueCode.AmountsDoNotAdd,
                 $"Сборът на сумите ({Money(inLedger)}) се различава от общата сума на документа във файла ({Money(inFile)})."));
 
         if (inLedger == 0m && doc.Lines.All(l => l.Base == 0m && l.Vat == 0m))
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.ZeroDocument,
+            doc.Issues.Add(new Issue(IssueCode.ZeroDocument,
                 "Нулев документ – проверете дали Делта Pro го приема."));
 
         if (doc.Kind == OperationKind.Sale &&
             doc.Segments.Any(s => s.IsVat && s.Amount != 0m && s.DealType is not (DealTypes.Sale20 or DealTypes.Sale9
                 or DealTypes.SaleIntraCommunityAcquisition or DealTypes.SaleArticle82 or DealTypes.SaleOtherTax)))
-            doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.VatMismatch,
+            doc.Issues.Add(new Issue(IssueCode.VatAtZeroDeal,
                 "Има ДДС при вид сделка, който е без ДДС."));
     }
 
     private static void MarkDuplicates(OperationBatch batch)
     {
-        foreach (var doc in batch.Documents) doc.Issues.RemoveAll(i => i.Code == IssueCode.Duplicate);
-
         var same = batch.Documents
-            .Where(d => d.Number.Length > 0)
+            .Where(d => d.Number.Length > 0 && d.Export)
             .GroupBy(d => (d.DocType, d.Number, Partner: d.Eik.Length > 0 ? d.Eik : d.VatNumber.Length > 0 ? d.VatNumber : d.PartnerName))
             .Where(g => g.Count() > 1);
 
@@ -328,7 +361,7 @@ public sealed class DocumentProcessor
             foreach (var doc in group)
             {
                 string others = string.Join(", ", group.Where(d => d != doc).Select(d => "№ " + d.Index));
-                doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.Duplicate,
+                doc.Issues.Add(new Issue(IssueCode.Duplicate,
                     $"Дублиран документ – същият тип, номер и контрагент като {others}."));
             }
     }

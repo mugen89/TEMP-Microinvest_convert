@@ -59,7 +59,7 @@ internal sealed partial class WorkView
             style.ForeColor = Theme.EditedInk;
             style.Font = Theme.Bold;
         };
-        _lines.Edited += _ => { if (_shown != null) DocumentsEdited([_shown]); };
+        _lines.Edited += _ => { if (_shown != null) Edited([_shown]); };
 
         // ----- how it will be posted -----
         _postings.Use(_palette);
@@ -83,13 +83,13 @@ internal sealed partial class WorkView
         _issues.AddColumn(new()
         {
             Header = "", Width = 28, Center = true,
-            Get = i => i.Severity switch { IssueSeverity.Error => "✖", IssueSeverity.Warning => "⚠", _ => "i" },
+            Get = i => i.Reviewed ? "✓" : i.Severity switch { IssueSeverity.Error => "✖", IssueSeverity.Warning => "⚠", _ => "i" },
         });
         _issues.AddColumn(new() { Header = "Забележки по документа", Width = 200, Fill = true, Get = i => i.Message });
         _issues.StyleCell = (issue, _, style) => style.ForeColor = issue.Severity switch
         {
             IssueSeverity.Error => Theme.ErrorInk,
-            IssueSeverity.Warning => Theme.WarningInk,
+            IssueSeverity.Warning when !issue.Reviewed => Theme.WarningInk,
             _ => Theme.Muted,
         };
     }
@@ -146,7 +146,7 @@ internal sealed partial class WorkView
         _detailsTitle.Text = $"{_shown.DocType} {_shown.Title}";
         _lines.SetRows(_shown.Lines);
         _postings.SetRows(PostingsOf(_shown));
-        _issues.SetRows(_shown.Issues.OrderByDescending(i => i.Severity));
+        _issues.SetRows(_shown.Issues.OrderByDescending(i => i.IsOpen).ThenByDescending(i => i.Severity));
     }
 
     private IEnumerable<Posting> PostingsOf(OperationDocument doc)

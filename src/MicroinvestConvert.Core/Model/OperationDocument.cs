@@ -101,7 +101,9 @@ public sealed class OperationDocument
     public bool SkippedBySetting { get; internal set; }
 
     public bool HasErrors => Issues.Any(i => i.Severity == IssueSeverity.Error);
-    public bool HasWarnings => Issues.Any(i => i.Severity == IssueSeverity.Warning);
+
+    /// <summary>A warning nobody has ticked off yet.</summary>
+    public bool HasWarnings => Issues.Any(i => i.Severity == IssueSeverity.Warning && !i.Reviewed);
 
     /// <summary>The document goes into the file.</summary>
     public bool WillExport => Export && !SkippedBySetting && !HasErrors;
@@ -112,6 +114,20 @@ public sealed class OperationDocument
     public IEnumerable<int> DealTypesUsed => Segments.Select(s => s.DealType).Distinct();
 
     public string Title => (Number.Length > 0 ? Number : "№ " + Index) + (PartnerName.Length > 0 ? " · " + PartnerName : "");
+
+    // ----- ticked off -----
+
+    // With its message: when the finding changes, it has to be looked at again.
+    private readonly HashSet<(IssueCode Code, string Message)> _reviewed = [];
+
+    internal bool IsReviewed(Issue issue) => _reviewed.Contains((issue.Code, issue.Message));
+
+    /// <summary>The user looked at a warning and it is fine. Shows after the next processing.</summary>
+    public void SetReviewed(Issue issue, bool reviewed)
+    {
+        if (reviewed) _reviewed.Add((issue.Code, issue.Message));
+        else _reviewed.Remove((issue.Code, issue.Message));
+    }
 
     // ----- editing -----
 
@@ -135,6 +151,7 @@ public sealed class OperationDocument
     {
         foreach (var (field, was) in _original) TrySet(field, was, out _);
         RevertLines();
+        _reviewed.Clear();
         Export = true;
     }
 
@@ -370,7 +387,7 @@ public enum VatStatus
     Unresolved,
 }
 
-/// <summary>The VAT control of a part of a document — what the „Проверка на ДДС" window lists.</summary>
+/// <summary>The VAT control of a part of a document — what „Проверки → ДДС" lists.</summary>
 public sealed class VatGroup
 {
     public required OperationDocument Document { get; init; }

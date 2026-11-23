@@ -4,11 +4,14 @@ using MicroinvestConvert.Core.Rules;
 using MicroinvestConvert.Core.Settings;
 using MicroinvestConvert.Core.Values;
 
-namespace MicroinvestConvert.App.Forms;
+namespace MicroinvestConvert.App.Forms.Checks;
 
 /// <summary>„Сметки": every account of the file, and the account it becomes in Делта Pro.</summary>
-internal sealed class AccountsForm : AppForm
+internal sealed class AccountsPage : CheckPage
 {
+    public const string PageTitle = "Сметки";
+    private const int TargetColumn = 4;
+
     private sealed class Row
     {
         public required string Account { get; init; }
@@ -26,25 +29,18 @@ internal sealed class AccountsForm : AppForm
         public bool Changed => Target != Original;
     }
 
-    private readonly AppState _app;
-    private readonly OperationBatch _batch;
     private readonly Grid<Row> _grid = new();
     private readonly RadioButton _onlyClient, _everybody;
-    private readonly List<Row> _rows;
+    private readonly FlatButton _save, _undo;
+    private List<Row> _rows = [];
 
-    public AccountsForm(AppState app, OperationBatch batch)
+    public override string Title => PageTitle;
+
+    public AccountsPage(ICheckHost host) : base(host)
     {
-        _app = app;
-        _batch = batch;
-        var palette = Palette.For(batch.Kind);
-        bool hasClient = batch.ClientEik.Length > 0;
+        bool hasClient = Batch.ClientEik.Length > 0;
 
-        Text = "Сметки";
-        AsDialog(880, 560, 720, 400);
-
-        _rows = CollectRows();
-
-        _grid.Use(palette);
+        _grid.Use(Palette);
         _grid.SetHeights(26, 30);
         _grid.AddColumn(new() { Header = "Във файла", Width = 110, Get = r => r.Key, Tip = "Основна сметка / подсметка" });
         _grid.AddColumn(new() { Header = "Име", Width = 220, Fill = true, Get = r => r.Name });
@@ -52,7 +48,8 @@ internal sealed class AccountsForm : AppForm
         _grid.AddColumn(new() { Header = "Документи", Width = 108, Right = true, Get = r => r.Documents.ToString(), SortKey = r => r.Documents });
         _grid.AddColumn(new()
         {
-            Header = "В Делта Pro", Width = 150, Get = r => r.Target, Tip = "Променете, ако сметката в Делта Pro е друга. Изтрийте, за да се върне автоматичната.",
+            Header = "✎ В Делта Pro", Width = 150, Get = r => r.Target,
+            Tip = "Променете, ако сметката в Делта Pro е друга. Изтрийте, за да се върне автоматичната.",
             Set = (r, v) =>
             {
                 string target = AccountText.Normalise(v);
@@ -64,55 +61,56 @@ internal sealed class AccountsForm : AppForm
         });
         _grid.StyleCell = (row, column, style) =>
         {
-            if (column != 4) return;
+            if (column != TargetColumn) return;
             style.Font = Theme.Bold;
+            style.BackColor = row.Changed ? Theme.WarningBack : Palette.Soft;
             if (row.Target != row.Automatic) style.ForeColor = Theme.EditedInk;
         };
+        _grid.Edited += _ => RefreshButtons();
         _grid.SortRequested += () => _grid.SetRows(_rows);
-        _grid.SetRows(_rows);
 
         _onlyClient = new RadioButton
         {
-            Text = hasClient ? $"Само за {(batch.ClientName.Length > 0 ? batch.ClientName : batch.ClientEik)}" : "Само за тази фирма (файлът няма ЕИК)",
-            AutoSize = true, Enabled = hasClient, Checked = hasClient, Margin = new Padding(3, 6, 12, 3), UseMnemonic = false,
+            Text = hasClient ? $"Само за {(Batch.ClientName.Length > 0 ? Batch.ClientName : Batch.ClientEik)}" : "Само за тази фирма (файлът няма ЕИК)",
+            AutoSize = true, Enabled = hasClient, Checked = hasClient, Margin = new Padding(3, 8, 12, 3), UseMnemonic = false,
         };
-        _everybody = new RadioButton { Text = "За всички фирми", AutoSize = true, Checked = !hasClient, Margin = new Padding(3, 6, 3, 3) };
+        _everybody = new RadioButton { Text = "За всички фирми", AutoSize = true, Checked = !hasClient, Margin = new Padding(3, 8, 3, 3) };
 
-        var note = Make.Text(
-            "Сметката се записва, както е във файла: основната сметка, после „/“ и подсметката – 4111 и 1 стават 4111/1, 411/1 и 1 стават 411/1/1. " +
-            "Когато в Делта Pro номерът е друг, напишете го в последната колона; запомня се и важи и за следващите файлове.", Theme.Muted, 820);
-        note.Margin = new Padding(12, 8, 12, 4);
+        _save = MakeButton("Запомни", Accept, "Важи веднага и за следващите файлове.", ButtonLook.Primary);
+        _undo = MakeButton("Отказ", () => Reload(keepTyped: false), "Въведеното тук се отхвърля.", ButtonLook.Quiet);
 
-        var save = new FlatButton("Запомни", ButtonLook.Primary);
-        save.Use(palette);
-        save.Click += (_, _) => Accept();
-        var cancel = new FlatButton("Отказ", ButtonLook.Quiet);
-        cancel.Click += (_, _) => DialogResult = DialogResult.Cancel;
-        CancelButton = cancel;
-
-        var bar = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new Padding(10, 6, 8, 8), BackColor = Theme.Surface };
+        var bar = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new Padding(8, 4, 5, 4) };
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var scope = Make.Flow(_onlyClient, _everybody);
-        bar.Controls.Add(scope, 0, 0);
-        bar.Controls.Add(Make.Flow(cancel, save), 1, 0);
+        bar.Controls.Add(Make.Flow(_onlyClient, _everybody), 0, 0);
+        bar.Controls.Add(Make.Flow(_undo, _save), 1, 0);
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.Controls.Add(note, 0, 0);
-        root.Controls.Add(_grid, 0, 1);
-        root.Controls.Add(bar, 0, 2);
-        Controls.Add(root);
+        Controls.Add(Rows(1,
+            Note("Сметката се записва, както е във файла: основната сметка, после „/“ и подсметката – 4111 и 1 стават 4111/1, 411/1 и 1 стават 411/1/1. " +
+                 "Когато в Делта Pro номерът е друг, напишете го в последната колона; запомня се и важи и за следващите файлове."),
+            _grid, bar));
         EndLayout();
     }
 
+    public override void RefreshRows() => Reload(keepTyped: true);
+
+    private void Reload(bool keepTyped)
+    {
+        var typed = keepTyped ? _rows.Where(r => r.Changed).ToDictionary(r => (r.Key, r.Role), r => r.Target) : [];
+        _rows = CollectRows();
+        foreach (var row in _rows)
+            if (typed.TryGetValue((row.Key, row.Role), out string? target)) row.Target = target;
+
+        _grid.SetRows(_rows);
+        RefreshButtons();
+    }
+
+    private void RefreshButtons() => _save.Enabled = _undo.Enabled = _rows.Any(r => r.Changed);
+
     private List<Row> CollectRows()
     {
-        bool purchase = _batch.Kind == OperationKind.Purchase;
-        var options = _app.Settings.OptionsFor(_batch.ClientEik);
+        bool purchase = Batch.Kind.IsPurchaseSide();
+        var options = Host.Options;
         var automatic = ConverterOptions.Default;
 
         Row New(string account, string analytic, string name, string role, int documents)
@@ -126,7 +124,7 @@ internal sealed class AccountsForm : AppForm
         }
 
         var rows = new List<Row>();
-        rows.AddRange(_batch.Documents
+        rows.AddRange(Batch.Documents
             .SelectMany(d => d.Lines.Select(l => (Doc: d, Line: l)))
             .Where(x => x.Line.Account.Length > 0)
             .GroupBy(x => x.Line.AccountKey)
@@ -134,9 +132,9 @@ internal sealed class AccountsForm : AppForm
             .Select(g => New(g.First().Line.Account, g.First().Line.Analytic,
                 g.First().Line.AnalyticName.Length > 0 ? g.First().Line.AnalyticName : g.First().Line.AccountName,
                 purchase ? "разход / актив" : "приход", g.Select(x => x.Doc).Distinct().Count())));
-        rows.AddRange(_batch.Documents.Where(d => d.CounterAccount.Length > 0).GroupBy(d => d.CounterAccount)
+        rows.AddRange(Batch.Documents.Where(d => d.CounterAccount.Length > 0).GroupBy(d => d.CounterAccount)
             .Select(g => New(g.Key, "", purchase ? "Доставчици" : "Клиенти", purchase ? "доставчик" : "клиент", g.Count())));
-        rows.AddRange(_batch.Documents.Where(d => d.IsCash && d.CashAccount.Length > 0).GroupBy(d => d.CashAccount)
+        rows.AddRange(Batch.Documents.Where(d => d.IsCash && d.CashAccount.Length > 0).GroupBy(d => d.CashAccount)
             .Select(g => New(g.Key, "", "Каса", "плащане в брой", g.Count())));
         return rows;
     }
@@ -145,16 +143,9 @@ internal sealed class AccountsForm : AppForm
     {
         _grid.EndEdit();
 
-        var changed = _rows.Where(r => r.Changed).ToList();
-        if (changed.Count == 0)
-        {
-            DialogResult = DialogResult.Cancel;
-            return;
-        }
-
-        var general = _app.Settings.General.Accounts;
-        var client = _onlyClient.Checked ? _app.Settings.ClientFor(_batch.ClientEik, _batch.ClientName) : null;
-        foreach (var row in changed)
+        var settings = Host.App.Settings;
+        var client = _onlyClient.Checked ? settings.ClientFor(Batch.ClientEik, Batch.ClientName) : null;
+        foreach (var row in _rows.Where(r => r.Changed))
         {
             if (client != null)
             {
@@ -164,16 +155,17 @@ internal sealed class AccountsForm : AppForm
             }
             else
             {
-                general.Remove(row.Key);
-                if (_app.Settings.Clients.TryGetValue(_batch.ClientEik, out var own)) own.Accounts.Remove(row.Key);
-                if (Resolve(row) != row.Target) general[row.Key] = row.Target;
+                settings.General.Accounts.Remove(row.Key);
+                if (settings.Clients.TryGetValue(Batch.ClientEik, out var own)) own.Accounts.Remove(row.Key);
+                if (Resolve(row) != row.Target) settings.General.Accounts[row.Key] = row.Target;
             }
         }
 
-        if (_app.Save() is { } problem) Dialogs.Warning(this, "Настройките не можаха да бъдат записани", problem);
-        DialogResult = DialogResult.OK;
+        if (Host.App.Save() is { } problem) Dialogs.Warning(FindForm(), "Настройките не можаха да бъдат записани", problem);
+        _rows = [];   // what was typed is in force now
+        Host.SettingsChanged();
     }
 
     private string Resolve(Row row) =>
-        AccountCodes.Format(row.Account, row.Analytic, _app.Settings.OptionsFor(_batch.ClientEik));
+        AccountCodes.Format(row.Account, row.Analytic, Host.App.Settings.OptionsFor(Batch.ClientEik));
 }
