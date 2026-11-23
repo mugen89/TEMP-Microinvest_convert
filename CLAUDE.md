@@ -74,7 +74,7 @@ unchanged.
 | `App/Forms` | `MainForm` (start window, `IHub`), `ModuleCard`, `ModuleForm` (one window per module), `WorkView` (3 files), `SettingsForm`, `UpdateForm` |
 | `App/Forms/Checks` | `ChecksForm` and its pages; they talk to the opened file through `ICheckHost` |
 | `App/Ui` | `Grid<T>`, `FileDrop` (dropping files), `Controls`, `Theme` |
-| `App/Updates` | `UpdateService` (GitHub releases), `UpdateInstaller` (swap of the running .exe, kept versions) |
+| `App/Updates` | `UpdateService` (GitHub releases), `UpdateInstaller` (swap of the running .exe, kept versions), `Changelog` (CHANGELOG.md inside the program, for „Какво е ново" after an update) |
 
 A new input format only has to produce an `OperationBatch`.
 

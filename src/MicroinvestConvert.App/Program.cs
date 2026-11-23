@@ -21,9 +21,10 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
         ErrorReporter.Install();
+        Version? replaced = null;
         if (UpdateInstaller.IsPublishedProgram)
         {
-            Installer.FinishPreviousInstall();
+            replaced = Installer.FinishPreviousInstall();
             UpdateInstaller.DropDownloads(DownloadFolder);
         }
 
@@ -31,7 +32,7 @@ internal static class Program
         if (args is ["--update"]) return UpdateWithoutWindow(updates);
 
         var app = new AppState(AppInfo.SettingsPath);
-        using (var main = new MainForm(app, updates))
+        using (var main = new MainForm(app, updates, replaced))
         {
             // A file dragged onto the .exe, or opened „с програмата".
             var files = args.Where(File.Exists).ToList();

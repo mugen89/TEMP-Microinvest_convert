@@ -174,6 +174,36 @@ public sealed class WindowTests : IDisposable
         main.App.RaiseSettingsChanged();
     });
 
+    // ----- after an update -----
+
+    [Fact]
+    public void The_first_start_after_an_update_says_so_and_shows_what_is_new() => OnScreen(main =>
+    {
+        Assert.Contains($"Програмата е обновена от 1.0.0 на {AppInfo.VersionText}.", Texts(main));
+        Assert.Contains(All(main).OfType<Button>(), b => b is { Text: "Какво е ново…", Visible: true });
+        Click(main, "Добре");
+        Assert.DoesNotContain(All(main).OfType<Button>(), b => b is { Text: "Какво е ново…", Visible: true });
+
+        using var form = new WhatsNewForm("Ново", Changelog.Between(new Version(1, 0, 0), AppInfo.Version));
+        form.StartPosition = FormStartPosition.Manual;
+        form.Location = new Point(-6000, 0);
+        form.Show();
+        string notes = All(form).OfType<TextBox>().Single().Text;
+        Assert.Contains(AppInfo.VersionText, notes);
+        Assert.Contains("Модул „Чуждестранни“", notes);
+        Assert.DoesNotContain("##", notes);
+    }, replaced: new Version(1, 0, 0));
+
+    [Fact]
+    public void Going_back_says_so_and_an_ordinary_start_says_nothing()
+    {
+        OnScreen(main => Assert.Contains($"Върната е версия {AppInfo.VersionText}.", Texts(main)), replaced: new Version(99, 0, 0));
+        OnScreen(main => Assert.DoesNotContain(Texts(main), t => t.Contains("обновена") || t.Contains("Върната")));
+        OnScreen(main => Assert.DoesNotContain(Texts(main), t => t.Contains("обновена")), replaced: AppInfo.Version);
+    }
+
+    private static List<string> Texts(Control parent) => All(parent).OfType<Label>().Where(l => l.Visible).Select(l => l.Text).ToList();
+
     // ----- dropping files -----
 
     [Fact]
@@ -284,12 +314,12 @@ public sealed class WindowTests : IDisposable
 
     // ----- operating -----
 
-    private void OnScreen(Action<MainForm> act) => OnThread(() =>
+    private void OnScreen(Action<MainForm> act, Version? replaced = null) => OnThread(() =>
     {
         var app = new AppState(Path.Combine(_folder, "settings", "settings.json"));
         app.Settings.CheckForUpdates = false;
         using var updates = new UpdateService(AppInfo.Version);
-        using var main = new MainForm(app, updates);
+        using var main = new MainForm(app, updates, replaced);
         main.StartPosition = FormStartPosition.Manual;
         main.Location = new Point(-6000, 0);
         main.Show();

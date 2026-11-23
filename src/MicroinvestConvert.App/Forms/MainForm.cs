@@ -26,6 +26,7 @@ internal sealed class MainForm : AppForm, IHub
     private readonly Dictionary<OperationKind, ModuleForm> _windows = [];
     private readonly Dictionary<OperationKind, ModuleCard> _cards = [];
     private readonly MessageBar _news = new(Color.FromArgb(255, 244, 214), Theme.WarningInk);
+    private readonly MessageBar _updated = new(Palette.Purchases.Soft, Theme.OkInk);
     private readonly Label _recentTitle = Make.Label("Последни файлове", font: Theme.Heading);
     private readonly FlowLayoutPanel _recent = new()
     {
@@ -35,10 +36,14 @@ internal sealed class MainForm : AppForm, IHub
 
     public AppState App { get; }
 
-    public MainForm(AppState app, UpdateService updates)
+    // The version that ran before this one was installed; null when it was this one.
+    private readonly Version? _replaced;
+
+    public MainForm(AppState app, UpdateService updates, Version? replaced = null)
     {
         App = app;
         _updates = updates;
+        _replaced = replaced;
 
         Text = $"{AppInfo.Name} {AppInfo.VersionText}";
         ClientSize = new Size(1080, 640);
@@ -47,14 +52,16 @@ internal sealed class MainForm : AppForm, IHub
         ShowInTaskbar = true;
         KeyPreview = true;
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.Controls.Add(BuildHeader(), 0, 0);
-        root.Controls.Add(_news, 0, 1);
-        root.Controls.Add(BuildContent(), 0, 2);
+        root.Controls.Add(_updated, 0, 1);
+        root.Controls.Add(_news, 0, 2);
+        root.Controls.Add(BuildContent(), 0, 3);
         Controls.Add(root);
 
         ExcelFiles.AcceptDrops(this, files => OpenFiles(files, null, this));
@@ -291,9 +298,34 @@ internal sealed class MainForm : AppForm, IHub
         Application.Exit();
     }
 
+    // The first start of another version says so, and what is new in it.
+    private void TellUpdated()
+    {
+        if (_replaced is not { } old || old == AppInfo.Version) return;
+
+        var close = new FlatButton("Добре", ButtonLook.Quiet);
+        close.Click += (_, _) => _updated.Visible = false;
+        if (old > AppInfo.Version)
+        {
+            _updated.Show($"Върната е версия {AppInfo.VersionText}.", close);
+            return;
+        }
+
+        string notes = Changelog.Between(old, AppInfo.Version);
+        var whatsNew = new FlatButton("Какво е ново…", ButtonLook.Primary);
+        whatsNew.Use(Palette.Purchases);
+        whatsNew.Click += (_, _) =>
+        {
+            using var form = new WhatsNewForm($"Ново от версия {old.ToString(3)} досега", notes);
+            form.ShowDialog(this);
+        };
+        _updated.Show($"Програмата е обновена от {old.ToString(3)} на {AppInfo.VersionText}.", whatsNew, close);
+    }
+
     protected override async void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        TellUpdated();
 
         if (App.LoadProblem.Length > 0)
             Dialogs.Warning(this, "Настройките не можаха да бъдат прочетени",

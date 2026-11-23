@@ -72,13 +72,14 @@ internal sealed class UpdateInstaller(string exePath, string keptFolder)
 
     /// <summary>
     /// At the start of the new version: the old one, which has just closed, goes to the kept
-    /// versions.
+    /// versions. Returns which one it was; null when nothing was installed since the last start.
     /// </summary>
-    public void FinishPreviousInstall()
+    public Version? FinishPreviousInstall()
     {
         TryQuietly(() => { if (File.Exists(NewPath)) File.Delete(NewPath); });
-        if (!File.Exists(OldPath)) return;
+        if (!File.Exists(OldPath)) return null;
 
+        var replaced = VersionOf(OldPath);
         for (int attempt = 0; attempt < 20; attempt++)
         {
             try
@@ -94,6 +95,7 @@ internal sealed class UpdateInstaller(string exePath, string keptFolder)
         }
 
         foreach (var extra in Kept().Skip(KeepVersions)) TryQuietly(() => File.Delete(extra.Path));
+        return replaced;
     }
 
     /// <summary>What was downloaded is in place by now.</summary>

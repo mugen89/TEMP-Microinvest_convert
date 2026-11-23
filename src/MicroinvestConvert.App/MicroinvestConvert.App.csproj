@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\app.ico" LogicalName="app.ico" />
+    <EmbeddedResource Include="..\..\CHANGELOG.md" LogicalName="CHANGELOG.md" Link="CHANGELOG.md" />
   </ItemGroup>
 
   <ItemGroup>

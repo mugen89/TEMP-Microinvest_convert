@@ -246,7 +246,9 @@ public sealed class UpdateInstallerTests : IDisposable
         }
 
         // what the new version does when it starts
-        installer.FinishPreviousInstall();
+        var oldVersion = UpdateInstaller.VersionOf(_exe + ".old");
+        Assert.Equal(oldVersion, installer.FinishPreviousInstall());
+        Assert.Null(installer.FinishPreviousInstall());   // told once
         Assert.False(File.Exists(_exe + ".old"));
         Assert.Equal(oldBytes, File.ReadAllBytes(Assert.Single(Directory.GetFiles(_kept))));
     }
@@ -280,10 +282,48 @@ public sealed class UpdateInstallerTests : IDisposable
     public void Finishing_without_an_update_does_nothing()
     {
         File.Copy(SystemTool("ping.exe"), _exe);
-        new UpdateInstaller(_exe, _kept).FinishPreviousInstall();
+        Assert.Null(new UpdateInstaller(_exe, _kept).FinishPreviousInstall());
         Assert.False(Directory.Exists(_kept));
     }
 
     [Fact]
     public void Running_from_the_development_tools_is_not_the_published_program() => Assert.False(UpdateInstaller.IsPublishedProgram);
+}
+
+public class ChangelogTests
+{
+    private const string Sample = "# Промени\r\n\r\nУвод.\r\n\r\n## 1.2.0 – 02.01.2027\r\n\r\n- второ\r\n\r\n### Подзаглавие\r\n\r\n## 1.1.0 – 01.01.2027\r\n\r\n- първо\r\n\r\n## 1.0.0\r\nначало\r\n";
+
+    [Fact]
+    public void The_sections_are_the_versions()
+    {
+        var sections = Changelog.Parse(Sample);
+        Assert.Equal(["1.2.0", "1.1.0", "1.0.0"], sections.Select(s => s.Version.ToString()));
+        Assert.Equal(("1.2.0 – 02.01.2027", "- второ\n\n### Подзаглавие"), (sections[0].Title, sections[0].Text));
+        Assert.Equal("начало", sections[2].Text);
+    }
+
+    [Theory]
+    [InlineData("1.0.0", "1.2.0", "1.2.0,1.1.0")]
+    [InlineData("1.1.0", "1.2.0", "1.2.0")]
+    [InlineData("1.0.0", "1.1.0", "1.1.0")]
+    [InlineData("1.2.0", "1.2.0", "")]
+    [InlineData("1.2.0", "1.0.0", "")]
+    public void Skipped_versions_are_told_about_too(string from, string to, string told)
+    {
+        string notes = Changelog.Join(Changelog.Parse(Sample), Version.Parse(from), Version.Parse(to));
+        Assert.Equal(told, string.Join(',', Changelog.Parse(notes).Select(s => s.Version)));
+    }
+
+    [Fact]
+    public void Nothing_to_parse_is_no_trouble() => Assert.Empty(Changelog.Parse(""));
+
+    /// <summary>The release takes its notes from here, so the newest version has to be the first one.</summary>
+    [Fact]
+    public void The_program_carries_its_own_notes()
+    {
+        Assert.Equal(AppInfo.Version, Changelog.Sections[0].Version);
+        Assert.All(Changelog.Sections, s => Assert.NotEmpty(s.Text));
+        Assert.Equal(Changelog.Sections.Select(s => s.Version).OrderDescending(), Changelog.Sections.Select(s => s.Version));
+    }
 }
