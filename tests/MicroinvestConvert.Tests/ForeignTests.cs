@@ -36,6 +36,14 @@ public class ForeignTests
         Assert.Equal(("4011", "5011", "Плащане", "бележка", "Разход за външни услуги"), (doc.CounterAccount, doc.CashAccount, doc.CashReason, doc.Note, doc.Reason));
         Assert.Equal((PaymentMethod.Cash, "Месечен абонамент", "Необлагаема"), (doc.Payment, line.Article, line.RateText));
         Assert.Equal((LedgerBucket.Foreign, 10m, 0m), (line.Bucket, line.Base, line.Vat));
+        Assert.Equal(("EUR", null), (line.Currency, line.Euro));
+    }
+
+    [Fact]
+    public void The_amount_of_the_invoice_and_the_euro_of_the_file_are_both_read()
+    {
+        var doc = Sheet.Invoice(1d, "INV-1", 100, "usd", 80m).Read().Documents[0];
+        Assert.Equal(("USD", "USD", 100m, 80m), (doc.Currency, doc.Lines[0].Currency, doc.Lines[0].Base, doc.Lines[0].Euro));
     }
 
     [Theory]
@@ -86,14 +94,25 @@ public class ForeignTests
     {
         var doc = Sheet.Invoice(1d, "INV-1", 100, "USD", null).Single();
         Assert.False(doc.WillExport);
-        Assert.Contains("кол. AI", doc.Issues.Single(i => i.Code == IssueCode.ForeignCurrency).Message);
+        Assert.Contains("Няма курс на USD за 10.09.2026", doc.Issues.Single(i => i.Code == IssueCode.MissingRate).Message);
 
+        // The amount in euro can be typed …
+        doc.Lines[0].TrySet(LineField.Euro, "86,27", out _);
+        Process(doc);
+        Assert.Equal(("86.27", true), (doc.Amounts(), doc.WillExport));
+        doc.Lines[0].TrySet(LineField.Euro, "", out _);
+        Process(doc);
+        Assert.False(doc.WillExport);
+
+        // … or the amount is said to be in euro already.
         doc.Lines[0].TrySet(LineField.Base, "86,27", out _);
         doc.TrySet(DocField.Currency, "EUR", out _);
-        new DocumentProcessor(ConverterOptions.Default).Process(Sheet.Invoice(9d, "9", 1, "EUR", 1).Read(), doc);
-        Assert.True(doc.WillExport);
-        Assert.Equal("86.27", doc.Amounts());
+        Process(doc);
+        Assert.Equal(("86.27", true), (doc.Amounts(), doc.WillExport));
     }
+
+    private static void Process(OperationDocument doc) =>
+        new DocumentProcessor(ConverterOptions.Default).Process(Sheet.Invoice(9d, "9", 1, "EUR", 1).Read(), doc);
 
     [Fact]
     public void The_conversion_is_shown_with_its_rate() =>
@@ -118,7 +137,7 @@ public class ForeignTests
             .Process();
         Assert.Equal([false, false, true, false], batch.Documents.Select(d => d.Has(IssueCode.EuroRate)));
 
-        batch.Documents[2].Lines[0].TrySet(LineField.Base, "43", out _);
+        batch.Documents[2].Lines[0].TrySet(LineField.Euro, "43", out _);
         new DocumentProcessor(ConverterOptions.Default).Process(batch, batch.Documents[2]);
         Assert.DoesNotContain(batch.Documents, d => d.Has(IssueCode.EuroRate));
     }
@@ -144,11 +163,12 @@ public class ForeignTests
     }
 
     [Fact]
-    public void Before_the_euro_the_books_are_in_leva()
+    public void The_books_are_in_euro_whatever_the_date()
     {
-        var doc = Sheet.Invoice(1d, "INV-1", 10, "EUR", 10, ("E", "10.11.2025"), ("H", "11.2025")).Single();
-        Assert.False(doc.WillExport);
-        Assert.True(doc.Has(IssueCode.ForeignCurrency));
+        var euro = Sheet.Invoice(1d, "INV-1", 10, "EUR", 10, ("E", "10.11.2025"), ("H", "11.2025")).Single();
+        Assert.Equal(("10", true), (euro.Amounts(), euro.WillExport));
+        var leva = Sheet.Invoice(1d, "INV-1", 19.56m, "BGN", null, ("E", "10.11.2025"), ("H", "11.2025")).Single();
+        Assert.Equal(("10", true), (leva.Amounts(), leva.WillExport));
     }
 
     [Fact]
@@ -223,7 +243,7 @@ public class CheckCatalogTests
         var sheet = new TestSheet(Layout.Purchases).Purchase(1d, "1", 480, 90).Purchase(2d, "2", 480, 90, ("T", "USD"));
         var settings = new ConverterSettings();
         settings.SetOff(IssueCode.VatUnresolved, true);
-        settings.ChecksOff.Add(nameof(IssueCode.ForeignCurrency));   // by hand in the file: an error stays an error
+        settings.ChecksOff.Add(nameof(IssueCode.MissingRate));   // by hand in the file: an error stays an error
 
         var batch = sheet.Process(settings);
         Assert.Equal(("4;4", false, true), (batch.Documents[0].Deals(), batch.Documents[0].HasWarnings, batch.Documents[0].WillExport));

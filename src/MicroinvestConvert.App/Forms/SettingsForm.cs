@@ -32,10 +32,10 @@ internal sealed class SettingsForm : AppForm
     private sealed class Mapping
     {
         /// <summary>Null = for everybody.</summary>
-        public required string? Eik { get; init; }
-        public required string Client { get; init; }
+        public required ClientSettings? Client { get; init; }
         public required string Source { get; init; }
         public required string Target { get; init; }
+        public required string Currency { get; init; }
     }
 
     public SettingsForm(AppState app, OperationBatch? batch)
@@ -95,8 +95,8 @@ internal sealed class SettingsForm : AppForm
 
     private Control BuildVatAccounts()
     {
-        bool hasClient = _clientEik.Length > 0;
-        _app.Settings.Clients.TryGetValue(_clientEik, out var client);
+        bool hasClient = _clientEik.Length > 0 || _clientName.Length > 0;
+        var client = _app.Clients.Find(_clientEik, _clientName);
         _clientPurchaseVat.Text = client?.PurchaseVatAccount ?? "";
         _clientSaleVat.Text = client?.SaleVatAccount ?? "";
         _clientPurchaseVat.PlaceholderText = _clientSaleVat.PlaceholderText = "като за всички";
@@ -146,11 +146,9 @@ internal sealed class SettingsForm : AppForm
 
     private Control BuildAccounts()
     {
-        foreach (var (source, target) in _app.Settings.General.Accounts)
-            _mappingRows.Add(new Mapping { Eik = null, Client = "Всички фирми", Source = source, Target = target });
-        foreach (var (eik, client) in _app.Settings.Clients)
-            foreach (var (source, target) in client.Accounts)
-                _mappingRows.Add(new Mapping { Eik = eik, Client = client.Name.Length > 0 ? client.Name : eik, Source = source, Target = target });
+        var general = _app.Settings.General;
+        AddMappings(null, general.Accounts, general.AccountCurrencies);
+        foreach (var client in _app.Clients.All) AddMappings(client, client.Accounts, client.AccountCurrencies);
 
         _mappings.ReadOnly = true;
         _mappings.SetHeights(25, 28);
@@ -158,7 +156,8 @@ internal sealed class SettingsForm : AppForm
         _mappings.BorderStyle = BorderStyle.FixedSingle;
         _mappings.AddColumn(new() { Header = "Във файла", Width = 110, Get = m => m.Source });
         _mappings.AddColumn(new() { Header = "В Делта Pro", Width = 110, Get = m => m.Target });
-        _mappings.AddColumn(new() { Header = "Важи за", Width = 200, Fill = true, Get = m => m.Client });
+        _mappings.AddColumn(new() { Header = "Валута", Width = 80, Center = true, Get = m => m.Currency, Tip = "На валутна сметка в Делта Pro" });
+        _mappings.AddColumn(new() { Header = "Важи за", Width = 200, Fill = true, Get = m => m.Client?.Name ?? "Всички фирми" });
         _mappings.SortRequested += () => _mappings.SetRows(_mappingRows);
         _mappings.SetRows(_mappingRows);
 
@@ -179,6 +178,16 @@ internal sealed class SettingsForm : AppForm
         page.Controls.Add(_mappings, 0, 1);
         page.Controls.Add(remove, 0, 2);
         return page;
+    }
+
+    private void AddMappings(ClientSettings? client, Dictionary<string, string> accounts, Dictionary<string, string> currencies)
+    {
+        foreach (string source in accounts.Keys.Union(currencies.Keys, StringComparer.OrdinalIgnoreCase))
+            _mappingRows.Add(new Mapping
+            {
+                Client = client, Source = source,
+                Target = accounts.GetValueOrDefault(source, ""), Currency = currencies.GetValueOrDefault(source, ""),
+            });
     }
 
     private void Accept()
@@ -210,26 +219,42 @@ internal sealed class SettingsForm : AppForm
         general.VatLines = (VatLines)_vatLines.SelectedIndex;
         _app.Settings.CheckForUpdates = _updates.Checked;
 
-        if (_app.Settings.ClientFor(_clientEik, _clientName) is { } client)
+        var changed = KeepMappings();
+        if (_clientEik.Length > 0 || _clientName.Length > 0)
         {
-            client.PurchaseVatAccount = clientPurchase;
-            client.SaleVatAccount = clientSale;
+            // A client is made only when there is something to keep for it.
+            var client = _app.Clients.FindOrNew(_clientEik, _clientName);
+            if (client.PurchaseVatAccount != clientPurchase || client.SaleVatAccount != clientSale)
+            {
+                client.PurchaseVatAccount = clientPurchase;
+                client.SaleVatAccount = clientSale;
+                changed.Add(client);
+            }
         }
 
-        KeepMappings();
-        if (_app.Save() is { } failure) Dialogs.Warning(this, "Настройките не можаха да бъдат записани", failure);
+        string? failure = _app.Save();
+        foreach (var client in changed) failure = _app.Save(client) ?? failure;
+        if (failure != null) Dialogs.Warning(this, "Настройките не можаха да бъдат записани", failure);
         DialogResult = DialogResult.OK;
     }
 
-    // What is left in the table is what stays.
-    private void KeepMappings()
+    // What is left in the table is what stays. Returns the clients it changed something for.
+    private HashSet<ClientSettings> KeepMappings()
     {
-        _app.Settings.General.Accounts.Clear();
-        foreach (var client in _app.Settings.Clients.Values) client.Accounts.Clear();
-        foreach (var row in _mappingRows)
+        Keep(null, _app.Settings.General.Accounts, _app.Settings.General.AccountCurrencies);
+        return _app.Clients.All.Where(c => Keep(c, c.Accounts, c.AccountCurrencies)).ToHashSet();
+
+        bool Keep(ClientSettings? client, Dictionary<string, string> accounts, Dictionary<string, string> currencies)
         {
-            var target = row.Eik == null ? _app.Settings.General.Accounts : _app.Settings.Clients[row.Eik].Accounts;
-            target[row.Source] = row.Target;
+            var left = _mappingRows.Where(r => r.Client == client).Select(r => r.Source).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var gone = accounts.Keys.Union(currencies.Keys, StringComparer.OrdinalIgnoreCase).Where(k => !left.Contains(k)).ToList();
+            foreach (string key in gone)
+            {
+                accounts.Remove(key);
+                currencies.Remove(key);
+            }
+
+            return gone.Count > 0;
         }
     }
 }

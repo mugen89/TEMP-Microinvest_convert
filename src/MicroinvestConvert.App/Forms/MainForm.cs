@@ -27,6 +27,8 @@ internal sealed class MainForm : AppForm, IHub
     private readonly Dictionary<OperationKind, ModuleCard> _cards = [];
     private readonly MessageBar _news = new(Color.FromArgb(255, 244, 214), Theme.WarningInk);
     private readonly MessageBar _updated = new(Palette.Purchases.Soft, Theme.OkInk);
+    private readonly MessageBar _database = new(Theme.ErrorBack, Theme.ErrorInk);
+    private readonly Label _rates = Make.Label("");
     private readonly Label _recentTitle = Make.Label("Последни файлове", font: Theme.Heading);
     private readonly FlowLayoutPanel _recent = new()
     {
@@ -46,26 +48,27 @@ internal sealed class MainForm : AppForm, IHub
         _replaced = replaced;
 
         Text = $"{AppInfo.Name} {AppInfo.VersionText}";
-        ClientSize = new Size(1080, 640);
+        ClientSize = new Size(1080, 690);
         MinimumSize = new Size(960, 540);
         StartPosition = FormStartPosition.CenterScreen;
         ShowInTaskbar = true;
         KeyPreview = true;
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty };
+        Control[] rows = [BuildHeader(), _updated, _news, _database, BuildContent(), BuildRates()];
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = rows.Length, Margin = Padding.Empty };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.Controls.Add(BuildHeader(), 0, 0);
-        root.Controls.Add(_updated, 0, 1);
-        root.Controls.Add(_news, 0, 2);
-        root.Controls.Add(BuildContent(), 0, 3);
+        for (int i = 0; i < rows.Length; i++)
+        {
+            root.RowStyles.Add(i == rows.Length - 2 ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.AutoSize));
+            root.Controls.Add(rows[i], 0, i);
+        }
+
         Controls.Add(root);
 
         ExcelFiles.AcceptDrops(this, files => OpenFiles(files, null, this));
         RefreshRecent();
+        RefreshRates();
+        App.Rates.Changed += RefreshRates;
         EndLayout();
     }
 
@@ -91,13 +94,15 @@ internal sealed class MainForm : AppForm, IHub
         settings.Click += (_, _) => ShowSettings(this, OnlyClient());
         var deals = new FlatButton("Видове сделки", ButtonLook.Quiet);
         deals.Click += (_, _) => ShowDealTypes(this);
+        var clients = new FlatButton("Фирми", ButtonLook.Quiet);
+        clients.Click += (_, _) => ShowClients();
         var update = new FlatButton("Обновяване", ButtonLook.Quiet);
         update.Click += (_, _) => ShowUpdates();
-        foreach (var button in new[] { settings, deals, update }) button.TabStop = false;
+        foreach (var button in new[] { settings, deals, clients, update }) button.TabStop = false;
 
         bar.Controls.Add(title, 0, 0);
         bar.Controls.Add(subtitle, 1, 0);
-        bar.Controls.Add(Make.Flow(deals, settings, update), 2, 0);
+        bar.Controls.Add(Make.Flow(deals, clients, settings, update), 2, 0);
         bar.Paint += (_, e) =>
         {
             using var pen = new Pen(Theme.Border);
@@ -143,6 +148,37 @@ internal sealed class MainForm : AppForm, IHub
         return page;
     }
 
+    // The days there are exchange rates for. Failures of the download are not shown here.
+    private Control BuildRates()
+    {
+        _rates.Margin = new Padding(8, 8, 3, 6);
+        var open = new FlatButton("Валутни курсове…", ButtonLook.Quiet) { TabStop = false };
+        open.Click += (_, _) => ShowRates();
+
+        var bar = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = Padding.Empty,
+            Padding = new Padding(14, 2, 10, 2), BackColor = Theme.Surface,
+        };
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bar.Controls.Add(_rates, 0, 0);
+        bar.Controls.Add(open, 1, 0);
+        bar.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.Border);
+            e.Graphics.DrawLine(pen, 0, 0, bar.Width, 0);
+        };
+        return bar;
+    }
+
+    private void RefreshRates()
+    {
+        if (IsDisposed) return;
+        _rates.Text = App.Rates.Summary;
+        _rates.ForeColor = App.Rates.IsRunning || App.Rates.Ranges.Count == 0 ? Theme.Muted : Theme.Ink;
+    }
+
     private void RefreshRecent()
     {
         _recent.SuspendLayout();
@@ -165,7 +201,22 @@ internal sealed class MainForm : AppForm, IHub
         }
 
         _recentTitle.Visible = existing.Count > 0;
+        FitRecent();
         _recent.ResumeLayout();
+    }
+
+    // A low window shows fewer of them: the places to drop a file come first.
+    private void FitRecent()
+    {
+        const int RestOfWindow = 472, OneFile = 26;   // at 96 DPI
+        int fit = Math.Clamp((ClientSize.Height * 96 / DeviceDpi - RestOfWindow) / OneFile, 1, 5);
+        for (int i = 0; i < _recent.Controls.Count; i++) _recent.Controls[i].Visible = i < fit;
+    }
+
+    protected override void OnClientSizeChanged(EventArgs e)
+    {
+        base.OnClientSizeChanged(e);
+        FitRecent();
     }
 
     // ----- modules -----
@@ -280,6 +331,19 @@ internal sealed class MainForm : AppForm, IHub
         form.ShowDialog(asker);
     }
 
+    private void ShowRates()
+    {
+        using var form = new RatesForm(App);
+        form.ShowDialog(this);
+    }
+
+    private void ShowClients()
+    {
+        using var form = new ClientsForm(App, _windows.Values.Select(w => w.Batch).OfType<OperationBatch>().ToList());
+        form.ShowDialog(this);
+        if (form.AnythingChanged) App.RaiseSettingsChanged();
+    }
+
     private void ShowUpdates()
     {
         if (_windows.Values.Any(w => w.HasUnsavedEdits) &&
@@ -331,6 +395,9 @@ internal sealed class MainForm : AppForm, IHub
             Dialogs.Warning(this, "Настройките не можаха да бъдат прочетени",
                 "Програмата започва със стандартните. Повреденият файл е запазен с разширение .bad.\n\n" + App.LoadProblem);
 
+        TellDatabaseProblem();
+        _ = App.Rates.UpdateQuietlyAsync();
+
         if (!App.Settings.CheckForUpdates) return;
         try
         {
@@ -347,6 +414,21 @@ internal sealed class MainForm : AppForm, IHub
         {
             // No internet, no news. The window „Обновяване" says why when asked.
         }
+    }
+
+    // Without a database there are no exchange rates and the clients are not kept.
+    private void TellDatabaseProblem()
+    {
+        if (App.DatabaseProblem.Length == 0) return;
+        var close = new FlatButton("Добре", ButtonLook.Quiet);
+        close.Click += (_, _) => _database.Visible = false;
+        _database.Show(App.DatabaseProblem.Replace('\n', ' '), close);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) App.Rates.Changed -= RefreshRates;
+        base.Dispose(disposing);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

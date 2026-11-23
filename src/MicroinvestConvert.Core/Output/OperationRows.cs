@@ -43,7 +43,7 @@ public static class OperationRows
         var row = NewRow(doc, isCashRow: false);
         string accounts = string.Join(';', doc.Segments.Select(s => s.Account));
 
-        row.Cells[L.Amounts] = string.Join(';', doc.Segments.Select(s => Amount(s.Amount)));
+        row.Cells[L.Amounts] = string.Join(';', doc.Segments.Select(s => InCurrency(doc, s.Amount, s.InCurrency, CurrencyOf(doc, s, options))));
         row.Cells[L.Accounts] = doc.Kind.IsPurchaseSide()
             ? accounts + "-" + doc.CounterAccountOut     // many debits – one credit
             : doc.CounterAccountOut + "-" + accounts;    // one debit – many credits
@@ -63,7 +63,7 @@ public static class OperationRows
         string type = purchase ? DocumentTypes.CashPayment : DocumentTypes.CashReceipt;
 
         var row = NewRow(doc, isCashRow: true);
-        row.Cells[L.Amounts] = Amount(doc.TotalGross);
+        row.Cells[L.Amounts] = InCurrency(doc, doc.TotalGross, doc.TotalInCurrency, doc.CounterCurrency.Length > 0 ? doc.CounterCurrency : doc.CashCurrency);
         row.Cells[L.Accounts] = purchase
             ? doc.CounterAccountOut + "-" + doc.CashAccountOut
             : doc.CashAccountOut + "-" + doc.CounterAccountOut;
@@ -90,6 +90,32 @@ public static class OperationRows
         row.Cells[L.ExportMonth] = Date(doc.AccountingDate);   // P = C
         return row;
     }
+
+    /// <summary>The currency an amount is kept in: of its own account, or of the one on the other side.</summary>
+    private static string CurrencyOf(OperationDocument doc, EntrySegment segment, ConverterOptions options)
+    {
+        if (doc.CounterCurrency.Length > 0 || segment.IsVat) return doc.CounterCurrency;
+        var own = segment.Lines.Select(l => options.AccountCurrency(l.Account, l.Analytic)).Distinct().ToList();
+        return own.Count == 1 ? own[0] : "";
+    }
+
+    /// <summary>
+    /// An amount on a currency account, as Model.xls has it: „euro (currency|rate|fixing)". The
+    /// rates are euro for one unit of the currency. Any other amount is euro only.
+    /// </summary>
+    private static string InCurrency(OperationDocument doc, decimal euro, decimal? amount, string accountCurrency)
+    {
+        if (accountCurrency.Length == 0 || amount is not { } inCurrency || inCurrency == 0m ||
+            doc.Conversions is not [var conversion] || conversion.Currency != accountCurrency)
+            return Amount(euro);
+
+        // What the euro of the file come to; otherwise the rate they were calculated with.
+        decimal rate = conversion.Origin == RateOrigin.File ? euro / inCurrency : 1m / conversion.PerEuro;
+        decimal fixing = conversion.Official is { } official ? 1m / official : rate;
+        return $"{Amount(euro)} ({Amount(inCurrency)}|{Rate(rate)}|{Rate(fixing)})";
+    }
+
+    private static string Rate(decimal value) => value.ToString("0.######", CultureInfo.InvariantCulture);
 
     private static string DealTypeCell(OperationDocument doc, ConverterOptions options) =>
         Sequence(doc.Segments.Select(s => s.DealType), options.General.DealTypeFormat == DealTypeFormat.SingleWhenEqual);

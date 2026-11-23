@@ -9,6 +9,11 @@ TestResults/
 .vs/
 .idea/
 
+# The database of the program: exchange rates and clients. Made beside the .exe.
+*.db
+*.db-*
+*.db.*
+
 # This repository is PUBLIC. Workbooks (client exports, converted files, the
 # Microinvest sample) stay on the machine and are never committed.
 *.xls

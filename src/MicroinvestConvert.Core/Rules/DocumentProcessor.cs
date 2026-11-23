@@ -1,3 +1,4 @@
+using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
 using MicroinvestConvert.Core.Settings;
@@ -15,10 +16,15 @@ public sealed class DocumentProcessor
     public ConverterOptions Options { get; }
     public VatRates Rates { get; }
 
-    public DocumentProcessor(ConverterOptions options)
+    private readonly IExchangeRates _exchange;
+
+    /// <param name="options">The settings in force.</param>
+    /// <param name="exchange">The exchange rates; without them only leva are converted.</param>
+    public DocumentProcessor(ConverterOptions options, IExchangeRates? exchange = null)
     {
         Options = options;
         Rates = new VatRates(options.General);
+        _exchange = exchange ?? NoRates.Instance;
     }
 
     public void Process(OperationBatch batch) => Process(batch, batch.Documents);
@@ -55,7 +61,7 @@ public sealed class DocumentProcessor
 
         CheckIdentity(doc);
         ResolveDate(doc);
-        CheckCurrency(doc);
+        CurrencyRules.Resolve(doc, _exchange);
 
         doc.VatGroups = doc.Kind switch
         {
@@ -138,19 +144,6 @@ public sealed class DocumentProcessor
                 "Поправете периода или датата, или включете „Сч. дата = дата на документа“."));
     }
 
-    private static void CheckCurrency(OperationDocument doc)
-    {
-        if (doc.Currency.Length == 0 || doc.Date is not { } date) return;
-
-        string book = BookCurrency.On(date);
-        if (doc.Currency == book) return;
-
-        doc.Issues.Add(new Issue(IssueCode.ForeignCurrency, doc.Kind == OperationKind.Foreign && doc.Currency != BookCurrency.Euro
-            ? $"Липсва обща сума в евро (кол. AI) – сумите са в {doc.Currency}. Въведете ги в {book} и сменете валутата на {book}."
-            : $"Сумите са в {doc.Currency}, а не в {book}. Превалутирането ще бъде добавено в следваща версия. " +
-              $"Ако сте поправили сумите, сменете валутата на {book}."));
-    }
-
     // ----- accounts -----
 
     private void ResolveAccounts(OperationDocument doc)
@@ -161,10 +154,10 @@ public sealed class DocumentProcessor
         CheckAccount(doc, doc.CounterAccountOut, IssueCode.MissingCounterAccount,
             purchase ? "сметката на доставчика (Кт)" : "сметката на клиента (Дт)");
 
-        string cash = doc.CashAccount.Length > 0 ? doc.CashAccount : Options.General.DefaultCashAccount;
+        string cash = doc.CashAccount.Length > 0 ? doc.CashAccount : Options.DefaultCashAccount;
         doc.CashAccountOut = AccountCodes.Format(cash, "", Options);
-        if (doc.IsCash && Options.General.CashRows)
-            CheckAccount(doc, doc.CashAccountOut, IssueCode.MissingCashAccount, "касовата сметка (плащане в брой)");
+        bool cashRow = doc.IsCash && Options.General.CashRows;
+        if (cashRow) CheckAccount(doc, doc.CashAccountOut, IssueCode.MissingCashAccount, "касовата сметка (плащане в брой)");
 
         foreach (var group in doc.Lines.GroupBy(l => l.AccountKey))
         {
@@ -173,6 +166,13 @@ public sealed class DocumentProcessor
             string rows = string.Join(", ", group.Select(l => l.SourceRow).Distinct());
             CheckAccount(doc, account, IssueCode.MissingAccount, $"{what} на ред {rows}");
         }
+
+        doc.CounterCurrency = Options.AccountCurrency(doc.CounterAccount, "");
+        doc.CashCurrency = cashRow ? Options.AccountCurrency(cash, "") : "";
+        CurrencyRules.CheckAccounts(doc, doc.Lines
+            .Select(l => (AccountCodes.Format(l.Account, l.Analytic, Options), Options.AccountCurrency(l.Account, l.Analytic)))
+            .Append((doc.CounterAccountOut, doc.CounterCurrency))
+            .Append((doc.CashAccountOut, doc.CashCurrency)));
     }
 
     private static void CheckAccount(OperationDocument doc, string account, IssueCode missing, string what)
@@ -188,8 +188,8 @@ public sealed class DocumentProcessor
     // ----- columns A, B, N, O -----
 
     /// <summary>
-    /// The amounts of a line for its deal type. Without tax credit (3) and outside the ledger
-    /// (1) the VAT of a purchase is part of the expense.
+    /// The amounts of a line for its deal type, in its own currency. Without tax credit (3) and
+    /// outside the ledger (1) the VAT of a purchase is part of the expense.
     /// </summary>
     private static (decimal Base, decimal Vat) AmountsOf(OperationDocument doc, LedgerLine line)
     {
@@ -213,10 +213,14 @@ public sealed class DocumentProcessor
         return (line.Base, line.Vat);
     }
 
+    /// <summary>The same for some lines together, in euro.</summary>
+    private static (decimal Base, decimal Vat) EuroOf(OperationDocument doc, List<LedgerLine> lines) =>
+        CurrencyRules.ToEuro(doc, lines, l => AmountsOf(doc, l));
+
     private void BuildSegments(OperationDocument doc)
     {
         // Credit notes are written with a minus; the platform usually sends them so.
-        decimal gross = doc.Lines.Sum(l => l.Gross);
+        decimal gross = CurrencyRules.GrossInEuro(doc, doc.Lines);
         bool creditNote = DocumentTypes.IsCreditNote(doc.DocType);
         decimal sign = creditNote && gross > 0m ? -1m : 1m;
 
@@ -230,14 +234,14 @@ public sealed class DocumentProcessor
         string vatAccount = doc.Kind.IsPurchaseSide() ? Options.PurchaseVatAccount : Options.SaleVatAccount;
         var segments = new List<EntrySegment>();
 
-        foreach (var deal in Ordered(doc.Lines, l => l.DealType))
+        foreach (var deal in Ordered(doc, doc.Lines, l => l.DealType))
         {
             var vatLines = new List<LedgerLine>();
-            foreach (var account in Ordered(deal, l => AccountCodes.Format(l.Account, l.Analytic, Options)))
+            foreach (var account in Ordered(doc, deal, l => AccountCodes.Format(l.Account, l.Analytic, Options)))
             {
                 var lines = account.ToList();
                 segments.Add(NewSegment(account.Key, NameOf(lines), false, deal.Key, lines,
-                    sign * lines.Sum(l => AmountsOf(doc, l).Base)));
+                    sign * EuroOf(doc, lines).Base, InCurrency(doc, lines, l => sign * AmountsOf(doc, l).Base)));
 
                 if (Options.General.VatLines == VatLines.PerAccount)
                     AddVat(doc, segments, vatAccount, deal.Key, lines, sign);
@@ -254,6 +258,9 @@ public sealed class DocumentProcessor
         doc.TotalVat = segments.Where(s => s.IsVat).Sum(s => s.Amount);
         doc.TotalBase = segments.Where(s => !s.IsVat).Sum(s => s.Amount);
         doc.TotalGross = doc.TotalBase + doc.TotalVat;
+        doc.TotalInCurrency = segments.Count > 0 && segments.TrueForAll(s => s.InCurrency != null) && doc.ForeignCurrencies.Count == 1
+            ? segments.Sum(s => s.InCurrency)
+            : null;
 
         if (doc.Kind == OperationKind.Sale)
         {
@@ -264,20 +271,26 @@ public sealed class DocumentProcessor
     }
 
     // Largest first; equal ones keep the order of the file.
-    private static List<IGrouping<TKey, LedgerLine>> Ordered<TKey>(IEnumerable<LedgerLine> lines, Func<LedgerLine, TKey> key) =>
-        lines.GroupBy(key).OrderByDescending(g => Math.Abs(g.Sum(l => l.Gross))).ToList();
+    private static List<IGrouping<TKey, LedgerLine>> Ordered<TKey>(OperationDocument doc, IEnumerable<LedgerLine> lines, Func<LedgerLine, TKey> key) =>
+        lines.GroupBy(key).OrderByDescending(g => Math.Abs(CurrencyRules.GrossInEuro(doc, g.ToList()))).ToList();
 
     private void AddVat(OperationDocument doc, List<EntrySegment> segments, string account, int deal, List<LedgerLine> lines, decimal sign)
     {
-        decimal vat = lines.Sum(l => AmountsOf(doc, l).Vat);
+        decimal vat = EuroOf(doc, lines).Vat;
         bool zeroDocument = vat == 0m && lines.All(l => l.Gross == 0m) && deal is
             DealTypes.PurchaseFullCredit or DealTypes.PurchasePartialCredit or DealTypes.Sale20 or DealTypes.Sale9;
 
         if (vat != 0m || zeroDocument)
-            segments.Add(NewSegment(account, "ДДС", true, deal, lines, sign * vat));
+            segments.Add(NewSegment(account, "ДДС", true, deal, lines, sign * vat, InCurrency(doc, lines, l => sign * AmountsOf(doc, l).Vat)));
     }
 
-    private static EntrySegment NewSegment(string account, string name, bool isVat, int deal, List<LedgerLine> lines, decimal raw) => new()
+    // Only amounts of one and the same currency have a sum in it.
+    private static decimal? InCurrency(OperationDocument doc, List<LedgerLine> lines, Func<LedgerLine, decimal> amount) =>
+        lines.Select(doc.CurrencyOf).Distinct().Count() == 1 && doc.CurrencyOf(lines[0]) != Currencies.Euro
+            ? Cents(lines.Sum(amount))
+            : null;
+
+    private static EntrySegment NewSegment(string account, string name, bool isVat, int deal, List<LedgerLine> lines, decimal raw, decimal? inCurrency) => new()
     {
         Account = account,
         AccountName = name,
@@ -287,10 +300,15 @@ public sealed class DocumentProcessor
         Lines = lines,
         Raw = raw,
         Amount = Cents(raw),
+        InCurrency = inCurrency,
     };
 
     private static string NameOf(List<LedgerLine> lines) =>
         lines.Select(l => l.AnalyticName.Length > 0 ? l.AnalyticName : l.AccountName).FirstOrDefault(t => t.Length > 0) ?? "";
+
+    /// <summary>The whole amount of a row in euro; null while its rate is not known.</summary>
+    public static decimal? EuroOf(OperationDocument doc, LedgerLine line) =>
+        doc.CurrencyOf(line) == Currencies.Euro || doc.ConversionOf(line) != null ? CurrencyRules.GrossInEuro(doc, [line]) : null;
 
     internal static decimal Cents(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 

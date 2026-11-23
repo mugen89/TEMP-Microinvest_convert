@@ -230,16 +230,15 @@ public class SettingsTests
         file.General.PurchaseVatAccount = "453/7";
         file.General.Rounding = VatRounding.Truncate;
         file.General.Accounts["401"] = "401/1";
-        var client = file.ClientFor("987654326", "Тестова Фирма ЕООД")!;
-        client.SaleVatAccount = "453/2/1";
-        client.Accounts["601/5"] = "601/9";
+        file.General.AccountCurrencies["401/2"] = "USD";
         file.AddRecent(@"C:\a.xlsx");
         new SettingsStore(path).Save(file);
 
         var loaded = new SettingsStore(path).Load();
-        var options = loaded.OptionsFor("987654326");
+        var options = new ConverterOptions(loaded.General, new ClientSettings { SaleVatAccount = "453/2/1", Accounts = { ["601/5"] = "601/9" } });
         Assert.Equal(("453/7", "453/2/1"), (options.PurchaseVatAccount, options.SaleVatAccount));
         Assert.Equal(("401/1", "601/9"), (options.MappedAccount("401"), options.MappedAccount("601/5")));
+        Assert.Equal(("USD", "USD", ""), (options.AccountCurrency("401", "2"), options.AccountCurrency("401/2", ""), options.AccountCurrency("401", "")));
         Assert.Equal(VatRounding.Truncate, loaded.General.Rounding);
         Assert.Equal([@"C:\a.xlsx"], loaded.RecentFiles);
         Assert.True(options.HasVatAccountException);
@@ -249,19 +248,22 @@ public class SettingsTests
     [Fact]
     public void A_client_without_exceptions_is_like_everybody()
     {
-        var options = new SettingsFile().OptionsFor("000000000");
-        Assert.Equal(("453/1", "453/2"), (options.PurchaseVatAccount, options.SaleVatAccount));
+        var options = new ConverterOptions(new ConverterSettings { DefaultCashAccount = "501" }, new ClientSettings { Name = "Фирма" });
+        Assert.Equal(("453/1", "453/2", "501"), (options.PurchaseVatAccount, options.SaleVatAccount, options.DefaultCashAccount));
         Assert.False(options.HasVatAccountException);
     }
 
     [Fact]
-    public void Empty_exceptions_are_not_kept()
+    public void What_the_earlier_versions_kept_for_a_client_stays_in_the_file()
     {
-        var file = new SettingsFile();
-        file.ClientFor("987654326", "Фирма");
         string path = TempFile();
-        new SettingsStore(path).Save(file);
-        Assert.Empty(new SettingsStore(path).Load().Clients);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{\"version\":2,\"clients\":{\"987654326\":{\"name\":\"Фирма\",\"purchaseVatAccount\":\"453/9\",\"accounts\":{\"401\":\"401/1\"}}}}");
+        var store = new SettingsStore(path);
+        store.Save(store.Load());
+
+        var client = new SettingsStore(path).Load().Clients["987654326"];
+        Assert.Equal(("Фирма", "453/9", "401/1"), (client.Name, client.PurchaseVatAccount, client.Accounts["401"]));
         Directory.Delete(Path.GetDirectoryName(path)!, true);
     }
 

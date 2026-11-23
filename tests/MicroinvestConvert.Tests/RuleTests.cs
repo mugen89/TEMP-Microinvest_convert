@@ -517,11 +517,11 @@ public class DocumentRuleTests
     }
 
     [Fact]
-    public void Another_currency_waits_for_the_next_version()
+    public void Another_currency_waits_for_its_rate()
     {
-        Assert.True(Purchases.Purchase(1d, "1", 100, 20, ("T", "USD")).Single().Has(IssueCode.ForeignCurrency));
-        Assert.True(Purchases.Purchase(1d, "1", 100, 20, ("T", "BGN")).Single().Has(IssueCode.ForeignCurrency));
-        Assert.False(Purchases.Purchase(1d, "1", 100, 20, ("T", "BGN"), ("E", "10.12.2025"), ("H", "12.2025")).Single().HasErrors);
+        Assert.True(Purchases.Purchase(1d, "1", 100, 20, ("T", "USD")).Single().Has(IssueCode.MissingRate));
+        Assert.False(Purchases.Purchase(1d, "1", 100, 20, ("T", "BGN")).Single().HasErrors);   // its rate is fixed
+        Assert.False(Purchases.Purchase(1d, "1", 100, 20, ("T", "EUR")).Single().HasErrors);
         Assert.False(Purchases.Purchase(1d, "1", 100, 20, ("T", "-")).Single().HasErrors);
     }
 

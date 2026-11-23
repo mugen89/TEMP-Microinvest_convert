@@ -10,6 +10,7 @@ public enum CheckArea
     Partner,
     Accounts,
     Amounts,
+    Currency,
     Vat,
     DealType,
 }
@@ -185,12 +186,6 @@ public static class CheckCatalog
         // ----- amounts -----
         new()
         {
-            Code = IssueCode.ForeignCurrency, Area = CheckArea.Amounts, Severity = IssueSeverity.Error,
-            Title = "Сумите не са във валутата на книгите", Fields = [DocField.Currency],
-            Help = "Превалутирането е за следваща версия. Поправете сумите и сменете валутата.",
-        },
-        new()
-        {
             Code = IssueCode.AmountsDoNotAdd, Area = CheckArea.Amounts, Severity = IssueSeverity.Warning,
             Title = "Сборът се различава от общата сума", Kinds = WithVat,
             Help = "Сумите по колоните за дневника не дават общата сума на документа.",
@@ -215,27 +210,53 @@ public static class CheckCatalog
         },
         new()
         {
-            Code = IssueCode.EuroTotalDiffers, Area = CheckArea.Amounts, Severity = IssueSeverity.Warning,
+            Code = IssueCode.SellerVatIncluded, Area = CheckArea.Amounts, Severity = IssueSeverity.Info,
+            Title = "ДДС на чуждия доставчик е в стойността", Kinds = Foreign,
+            Help = "Във фактурата има ДДС на доставчика. Той не е български и влиза в разхода.",
+        },
+
+        // ----- currency -----
+        new()
+        {
+            Code = IssueCode.MissingRate, Area = CheckArea.Currency, Severity = IssueSeverity.Error,
+            Title = "Няма курс към еврото", Fields = [DocField.RateDate, DocField.Rate, DocField.Currency],
+            Help = "Сумите са във валута, а курсът за датата не е изтеглен. Изтеглете го от „Валутни курсове“, изберете друга дата или въведете курс – колко единици валута са едно евро.",
+        },
+        new()
+        {
+            Code = IssueCode.RateDiffers, Area = CheckArea.Currency, Severity = IssueSeverity.Warning,
+            Title = "Различава се от официалния курс", Fields = [DocField.RateDate, DocField.Rate],
+            Help = "Сумата в евро от файла или въведеният курс не отговарят на официалния курс за датата. С „Дата на курса“ сумата се преизчислява.",
+        },
+        new()
+        {
+            Code = IssueCode.EuroTotalDiffers, Area = CheckArea.Currency, Severity = IssueSeverity.Warning,
             Title = "Сумата в евро се различава от фактурата", Kinds = Foreign,
             Help = "Фактурата е в евро, но сумата в кол. AI не е тази в кол. Z.",
         },
         new()
         {
-            Code = IssueCode.EuroRate, Area = CheckArea.Amounts, Severity = IssueSeverity.Warning,
-            Title = "Необичаен курс към еврото", Kinds = Foreign,
-            Help = "Курсът, който излиза от кол. Z и AI, е различен от този на другите редове или документи в същата валута.",
+            Code = IssueCode.EuroRate, Area = CheckArea.Currency, Severity = IssueSeverity.Warning,
+            Title = "Необичаен курс към еврото", Fields = [DocField.RateDate, DocField.Rate], Kinds = Foreign,
+            Help = "Курсът, който излиза от кол. Z и AI, е различен от този на другите редове или документи в същата валута. Официалният курс за датата не е изтеглен.",
         },
         new()
         {
-            Code = IssueCode.ConvertedToEuro, Area = CheckArea.Amounts, Severity = IssueSeverity.Info,
-            Title = "Преизчислено в евро от AI Accounting", Kinds = Foreign,
-            Help = "Фактурата е във валута; записва се сумата в евро от кол. AI.",
+            Code = IssueCode.AccountCurrency, Area = CheckArea.Currency, Severity = IssueSeverity.Warning,
+            Title = "Сметка в друга валута", Fields = [DocField.CounterAccount, DocField.Currency],
+            Help = "В „Сметки“ сметката е отбелязана като валутна, но документът не е в нейната валута. Сумата по нея се записва само в евро.",
         },
         new()
         {
-            Code = IssueCode.SellerVatIncluded, Area = CheckArea.Amounts, Severity = IssueSeverity.Info,
-            Title = "ДДС на чуждия доставчик е в стойността", Kinds = Foreign,
-            Help = "Във фактурата има ДДС на доставчика. Той не е български и влиза в разхода.",
+            Code = IssueCode.CreditNoteRate, Area = CheckArea.Currency, Severity = IssueSeverity.Info,
+            Title = "Кредитно известие по курса за датата му", Fields = [DocField.RateDate],
+            Help = "Ако известието трябва да е по курса на фактурата, въведете нейната дата в „Дата на курса“.",
+        },
+        new()
+        {
+            Code = IssueCode.ConvertedToEuro, Area = CheckArea.Currency, Severity = IssueSeverity.Info,
+            Title = "Превалутирано в евро", Fields = [DocField.RateDate, DocField.Rate],
+            Help = "Документът е във валута и се записва в евро: от файла или по официалния курс за датата на документа – или за друга дата, избрана в „Дата на курса“.",
         },
 
         // ----- VAT -----
@@ -359,6 +380,7 @@ public static class CheckCatalog
         CheckArea.Partner => "Контрагент",
         CheckArea.Accounts => "Сметки",
         CheckArea.Amounts => "Суми",
+        CheckArea.Currency => "Валута",
         CheckArea.Vat => "ДДС",
         _ => "Вид сделка",
     };

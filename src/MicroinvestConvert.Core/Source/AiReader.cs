@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
 using MicroinvestConvert.Core.Rules;
@@ -108,8 +109,7 @@ public static partial class AiReader
             PartnerName = Text(C.PartnerName),
             Eik = partner.Eik,
             VatNumber = partner.VatNumber,
-            // The amounts of the foreign export are taken from its column in EUR.
-            Currency = file.Kind == OperationKind.Foreign ? BookCurrency.Euro : BookCurrency.Normalise(Text(columns.Currency)),
+            Currency = Currencies.Normalise(Text(columns.Currency)),
             Payment = PaymentMethods.FromText(Text(columns.Payment)),
             CounterAccount = Text(columns.CounterAccount),
         };
@@ -123,6 +123,8 @@ public static partial class AiReader
 
         return doc;
     }
+
+    private static string CurrencyOf(AiFile file, int row) => Currencies.Normalise(CellValues.Norm(file.Sheet.Cell(row, file.Columns.Currency)));
 
     // The foreign export has the ЕИК and the VAT number apart, the others in one cell.
     private static string PartnerIdOf(AiFile file, int row)
@@ -203,8 +205,8 @@ public static partial class AiReader
     }
 
     /// <summary>
-    /// A row of the foreign export: one amount, in EUR. The columns of the seller are in the
-    /// currency of the invoice; without the EUR column the document waits for its amounts.
+    /// A row of the foreign export: one amount, in the currency of the invoice – and the same in
+    /// euro, already converted by the platform. Without it the amount is converted here.
     /// </summary>
     private static void ReadForeignRow(AiFile file, int row, OperationDocument doc)
     {
@@ -213,16 +215,10 @@ public static partial class AiReader
         decimal Amount(int column) => CellValues.NumberOrZero(sheet.Cell(row, column));
         string Text(int column) => CellValues.Norm(sheet.Cell(row, column));
 
-        string currency = BookCurrency.Normalise(Text(columns.Currency));
-        if (currency.Length == 0) currency = BookCurrency.Euro;
-        decimal inCurrency = Gross(file, row);
-        decimal inEuro = Amount(columns.EuroTotal);
-
-        if (inEuro == 0m && inCurrency != 0m)
-        {
-            inEuro = inCurrency;   // in EUR it is the amount; otherwise it is asked for
-            if (currency != BookCurrency.Euro) doc.Currency = currency;
-        }
+        string currency = CurrencyOf(file, row);
+        if (currency.Length == 0) currency = doc.Currency;
+        decimal total = Gross(file, row);
+        decimal? euro = Amount(columns.EuroTotal) is var e && (e != 0m || total == 0m) ? e : null;
 
         if (!IsYes(Text(columns.NoDiary)) ||
             new[] { columns.NoCredit, columns.FullBase, columns.FullVat, columns.PartialBase, columns.PartialVat }.Any(c => Amount(c) != 0m))
@@ -233,7 +229,9 @@ public static partial class AiReader
             AddOnce(doc.ReadIssues, new Issue(IssueCode.SellerVatIncluded,
                 $"Във фактурата има ДДС на доставчика ({RuleText.Money(sellerVat)} {currency}) – влиза в стойността."));
 
-        AddLines(file, row, doc, [(LedgerBucket.Foreign, inEuro, 0m)], inEuro, "", currency, inCurrency);
+        // An invoice in euro has one amount, and what the platform calls „в евро" is it.
+        if (currency is "" or Currencies.Euro) AddLines(file, row, doc, [(LedgerBucket.Foreign, euro ?? total, 0m)], total, "");
+        else AddLines(file, row, doc, [(LedgerBucket.Foreign, total, 0m)], total, "", euro);
     }
 
     private static void ReadSaleRow(AiFile file, int row, OperationDocument doc)
@@ -269,8 +267,7 @@ public static partial class AiReader
     }
 
     private static void AddLines(AiFile file, int row, OperationDocument doc,
-        List<(LedgerBucket Bucket, decimal Base, decimal Vat)> parts, decimal gross, string journalCell,
-        string currency = "", decimal inCurrency = 0m)
+        List<(LedgerBucket Bucket, decimal Base, decimal Vat)> parts, decimal gross, string journalCell, decimal? euro = null)
     {
         var sheet = file.Sheet;
         var columns = file.Columns;
@@ -295,14 +292,14 @@ public static partial class AiReader
                 Article = Text(columns.Article),
                 Base = @base,
                 Vat = vat,
+                Currency = CurrencyOf(file, row),
+                Euro = euro,
                 RateText = Text(columns.SellerRate),
                 DeclaredRate = VatRates.ParseRate(sheet.Cell(row, columns.SellerRate)),
                 Treatment = Text(columns.Treatment),
                 JournalCell = journalCell,
                 SellerTotal = first ? gross : 0m,
                 SellerVat = parts.Count == 1 ? sellerVat : 0m,
-                InvoiceCurrency = currency,
-                InvoiceTotal = inCurrency,
             });
             first = false;
         }
@@ -319,6 +316,7 @@ public static partial class AiReader
             .Select(l => CellValues.Norm(file.Sheet.Cell(l.SourceRow - 1, column)))
             .FirstOrDefault(t => t.Length > 0) ?? "";
 
+        if (doc.Currency.Length == 0) doc.Currency = doc.Lines.Select(l => l.Currency).FirstOrDefault(c => c.Length > 0) ?? Currencies.Euro;
         doc.CashAccount = FirstText(columns.CashAccount);
         if (doc.CounterAccount.Length == 0) doc.CounterAccount = FirstText(columns.CounterAccount);
         doc.CashReason = FirstText(columns.CashOperationName);

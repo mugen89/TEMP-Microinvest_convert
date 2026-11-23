@@ -20,6 +20,7 @@ internal sealed partial class WorkView : AppView, ICheckHost
         Errors,
         Edited,
         Excluded,
+        Currency,
     }
 
     private static readonly (Filter Filter, string Label)[] Filters =
@@ -29,6 +30,7 @@ internal sealed partial class WorkView : AppView, ICheckHost
         (Filter.Errors, "Само с грешки"),
         (Filter.Edited, "Коригирани"),
         (Filter.Excluded, "Няма да се запишат"),
+        (Filter.Currency, "Във валута"),
     ];
 
     private readonly AppState _app;
@@ -58,6 +60,7 @@ internal sealed partial class WorkView : AppView, ICheckHost
     private readonly FlatButton _allChecks = new("Проверки");
     private readonly FlatButton _vatCheck = new("ДДС");
     private readonly FlatButton _accounts = new("Сметки");
+    private readonly FlatButton _rates = new("Курсове");
     private readonly Label _exception = Make.Label("", Theme.WarningInk, Theme.Bold);
     private readonly ComboBox _filter = Make.Combo(200);
     private readonly TextBox _search = Make.TextBox(160, "Търсене");
@@ -69,13 +72,14 @@ internal sealed partial class WorkView : AppView, ICheckHost
     private readonly CheckBox _openAfter = Make.Check("Отвори след запис");
     private readonly FlatButton _save = new("Запиши за Делта Pro…", ButtonLook.Primary);
     private readonly ToolTip _tips = new() { AutoPopDelay = 15000 };
+    private readonly System.Windows.Forms.Timer _afterEdit = new() { Interval = 300 };
 
     public WorkView(AppState app, OperationBatch batch)
     {
         _app = app;
         Batch = batch;
         _palette = Palette.For(batch.Kind);
-        _processor = new DocumentProcessor(app.Settings.OptionsFor(batch.ClientEik));
+        _processor = NewProcessor();
         _processor.Process(batch);
 
         BuildDocuments();
@@ -94,8 +98,14 @@ internal sealed partial class WorkView : AppView, ICheckHost
 
         RefreshAll();
         app.SettingsChanged += SettingsChanged;
+        app.Rates.Arrived += RatesArrived;
+        app.Rates.Changed += RefreshRates;
+        _afterEdit.Tick += (_, _) => RatesArrived();
+        AskForRates();
         EndLayout();
     }
+
+    private DocumentProcessor NewProcessor() => new(_app.OptionsFor(Batch), _app.Rates.Table);
 
     // ----- toolbar, footer -----
 
@@ -121,13 +131,16 @@ internal sealed partial class WorkView : AppView, ICheckHost
         _vatCheck.Visible = HasVat;
         _accounts.Use(_palette);
         _accounts.Click += (_, _) => ShowChecks(AccountsPage.PageTitle);
+        _rates.Use(_palette);
+        _rates.Click += (_, _) => ShowRates();
+        _tips.SetToolTip(_rates, "Валутни курсове: за кои дни ги има и изтегляне.");
 
         _filter.Items.AddRange(Filters.Select(f => (object)f.Label).ToArray());
         _filter.SelectedIndex = 0;
         _filter.SelectedIndexChanged += (_, _) => RefreshDocuments();
         _search.TextChanged += (_, _) => RefreshDocuments();
 
-        var left = Make.Flow(_dateRule, Make.Gap(10), _allChecks, _vatCheck, _accounts, _exception);
+        var left = Make.Flow(_dateRule, Make.Gap(10), _allChecks, _vatCheck, _accounts, _rates, _exception);
         var right = Make.Flow(_filter, _search);
 
         var bar = new TableLayoutPanel
@@ -194,9 +207,10 @@ internal sealed partial class WorkView : AppView, ICheckHost
     {
         _dateRule.Checked = _app.Settings.General.AccountingDateEqualsDocumentDate;
         _openAfter.Checked = _app.Settings.OpenAfterSave;
-        _processor = new DocumentProcessor(_app.Settings.OptionsFor(Batch.ClientEik));
+        _processor = NewProcessor();
         _processor.Process(Batch);
         RefreshAll();
+        AskForRates();
     }
 
     void ICheckHost.SettingsChanged() => _app.RaiseSettingsChanged();
@@ -212,7 +226,15 @@ internal sealed partial class WorkView : AppView, ICheckHost
     public void Ticked(IReadOnlyList<OperationDocument> documents)
     {
         _processor.Process(Batch, documents);
-        _documents.Invalidate();   // the rows stay where they are, also when they leave the filter
+        RefreshInPlace();
+        AskForRates();
+    }
+
+    // The rows stay where they are, also when they leave the filter, and so do the chosen ones.
+    private void RefreshInPlace()
+    {
+        ShowCurrencyColumns();
+        _documents.Invalidate();
         RefreshDetails();
         RefreshSummary();
         if (_tabs.SelectedIndex == 1) RefreshPreview();
@@ -221,6 +243,7 @@ internal sealed partial class WorkView : AppView, ICheckHost
 
     private void RefreshAll()
     {
+        ShowCurrencyColumns();
         RefreshDocuments();
         RefreshDetails();
         RefreshSummary();
@@ -250,6 +273,7 @@ internal sealed partial class WorkView : AppView, ICheckHost
         _allChecks.Text = open > 0 ? $"Проверки ({open})" : "Проверки";
         _allChecks.Font = open > 0 ? Theme.Bold : Theme.Base;
 
+        RefreshRates();
         int vat = VatPage.OpenQuestions(Batch);
         _vatCheck.Text = vat > 0 ? $"ДДС ({vat})" : "ДДС";
         _vatCheck.Font = vat > 0 ? Theme.Bold : Theme.Base;
@@ -261,6 +285,44 @@ internal sealed partial class WorkView : AppView, ICheckHost
         _exception.Visible = account != usual && HasVat;
     }
 
+    // ----- exchange rates -----
+
+    /// <summary>The days whose rates the documents need and are not there, the newest last.</summary>
+    private List<DateTime> UnknownRateDays() => Batch.Documents.Select(d => d.UnknownRateDay).OfType<DateTime>().Distinct().Order().ToList();
+
+    // They come by themselves, when that is allowed, and everything is calculated again.
+    private void AskForRates() => _app.Rates.Need(UnknownRateDays());
+
+    // From the background, at any moment: what is being typed is let to be finished.
+    private void RatesArrived()
+    {
+        _afterEdit.Enabled = IsTyping(this) || (_checks != null && IsTyping(_checks));
+        if (_afterEdit.Enabled) return;
+
+        _processor.Process(Batch);
+        RefreshInPlace();
+        AskForRates();
+    }
+
+    private static bool IsTyping(Control parent) => parent.Controls.Cast<Control>().Any(c =>
+        c is DataGridView { IsCurrentCellInEditMode: true, EditingControl: TextBox or ComboBox { DroppedDown: true } } || IsTyping(c));
+
+    private void ShowRates()
+    {
+        EndEdits();
+        using var form = new RatesForm(_app, UnknownRateDays());
+        form.ShowDialog(FindForm());
+    }
+
+    private void RefreshRates()
+    {
+        if (IsDisposed) return;
+        int waiting = Batch.Documents.Count(d => d.Issues.Any(i => i.Code == IssueCode.MissingRate));
+        _rates.Visible = Batch.Documents.Any(d => d.InForeignCurrency);
+        _rates.Text = waiting == 0 ? "Курсове" : _app.Rates.IsRunning ? "Курсове…" : $"Курсове ({waiting})";
+        _rates.Font = waiting > 0 ? Theme.Bold : Theme.Base;
+    }
+
     private bool Matches(OperationDocument doc)
     {
         bool passes = _filter.SelectedIndex < 0 ? true : Filters[_filter.SelectedIndex].Filter switch
@@ -269,6 +331,7 @@ internal sealed partial class WorkView : AppView, ICheckHost
             Filter.Errors => doc.HasErrors,
             Filter.Edited => doc.AnyEdited,
             Filter.Excluded => !doc.WillExport,
+            Filter.Currency => doc.InForeignCurrency,
             _ => true,
         };
         if (!passes) return false;
@@ -411,7 +474,10 @@ internal sealed partial class WorkView : AppView, ICheckHost
         if (disposing)
         {
             _app.SettingsChanged -= SettingsChanged;
+            _app.Rates.Arrived -= RatesArrived;
+            _app.Rates.Changed -= RefreshRates;
             CloseChecks();
+            _afterEdit.Dispose();
             _tips.Dispose();
         }
 

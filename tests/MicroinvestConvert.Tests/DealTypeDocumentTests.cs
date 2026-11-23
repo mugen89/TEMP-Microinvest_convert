@@ -140,6 +140,27 @@ public class DealTypeDocumentTests
             .Invoice(1d, "1", -50, "EUR", -50, ("B", "КИ"), ("C", 3d))));
     }
 
+    [Theory]
+    [InlineData("| покупка за 1 000,00 + 20% USD, 1 EUR = 1,25 USD |", "401", "")]
+    [InlineData("| същата по валутна сметка 401/2 (USD) |", "401/2", "USD")]
+    public void The_examples_of_currency_come_out_as_written(string start, string supplier, string accountCurrency)
+    {
+        var settings = new ConverterSettings();
+        if (accountCurrency.Length > 0) settings.AccountCurrencies[supplier] = accountCurrency;
+        var options = new ConverterOptions(settings);
+        var batch = new TestSheet(Layout.Purchases).Purchase(1d, "1", 1000, 200, ("T", "USD"), ("AI", supplier)).Read();
+        new DocumentProcessor(options, new SomeRates().Add("USD", "10.06.2026", 1.25m)).Process(batch);
+        string[] cells = OperationRows.Build(batch, options)[0].Cells;
+
+        string line = Lines.Single(l => l.StartsWith(start, StringComparison.Ordinal));
+        Assert.Equal(Regex.Matches(line, "`([^`]*)`").Select(m => m.Groups[1].Value.Replace(@"\|", "|")),
+            [cells[OperationsLayout.Amounts], cells[OperationsLayout.Accounts], cells[OperationsLayout.DealType]]);
+    }
+
+    [Fact]
+    public void The_fixed_rate_of_the_lev_is_the_documented_one() =>
+        Assert.Contains($"1 EUR = {Core.Exchange.Currencies.LevaPerEuro.ToString(Bulgarian)} BGN", Row("Вл6")[2]);
+
     [Fact]
     public void A_foreign_supplier_outside_the_ledger_is_written_and_warned_about()
     {

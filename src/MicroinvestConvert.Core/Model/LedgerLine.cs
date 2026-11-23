@@ -10,6 +10,7 @@ public enum LineField
     Analytic,
     Base,
     Vat,
+    Euro,
     DealType,
 }
 
@@ -36,9 +37,18 @@ public sealed class LedgerLine
     public string AnalyticName { get; init; } = "";
     public string Article { get; init; } = "";
 
-    /// <summary>Base of the ledger bucket; for „без кредит" and „без дневник" — the gross amount.</summary>
+    /// <summary>
+    /// Base of the ledger bucket; for „без кредит" and „без дневник" — the gross amount. In the
+    /// currency of the row, like <see cref="Vat"/>.
+    /// </summary>
     public decimal Base { get; set; }
     public decimal Vat { get; set; }
+
+    /// <summary>The currency of the row in the file; empty when it says nothing.</summary>
+    public string Currency { get; init; } = "";
+
+    /// <summary>The whole amount of the row in euro, when the file has it (the foreign export, column AI).</summary>
+    public decimal? Euro { get; set; }
 
     /// <summary>Text of „% ДДС продавач" as in the file.</summary>
     public string RateText { get; init; } = "";
@@ -57,12 +67,6 @@ public sealed class LedgerLine
 
     /// <summary>„ДДС продавач" of the source row; 0 when the row was split.</summary>
     public decimal SellerVat { get; init; }
-
-    /// <summary>The currency of a foreign invoice; empty for the other exports.</summary>
-    public string InvoiceCurrency { get; init; } = "";
-
-    /// <summary>The total of a foreign invoice in its own currency.</summary>
-    public decimal InvoiceTotal { get; init; }
 
     // ----- chosen by the user -----
 
@@ -112,6 +116,7 @@ public sealed class LedgerLine
         Article = Article,
         Base = @base,
         Vat = vat,
+        Currency = Currency,
         RateText = RateText,
         DeclaredRate = rate,
         Treatment = Treatment,
@@ -127,6 +132,7 @@ public sealed class LedgerLine
         LineField.Analytic => Analytic,
         LineField.Base => Base.ToString("0.##########", CultureInfo.InvariantCulture),
         LineField.Vat => Vat.ToString("0.##########", CultureInfo.InvariantCulture),
+        LineField.Euro => Euro?.ToString("0.##########", CultureInfo.InvariantCulture) ?? "",
         LineField.DealType => DealTypeOverride?.ToString(CultureInfo.InvariantCulture) ?? "",
         _ => "",
     };
@@ -160,6 +166,16 @@ public sealed class LedgerLine
 
                 if (field == LineField.Base) Base = amount;
                 else Vat = amount;
+                return true;
+            case LineField.Euro:
+                // Cleared = not given: the amount is converted.
+                if (value.Length > 0 && CellValues.Number(value) is null)
+                {
+                    error = $"„{value}“ не е сума.";
+                    return false;
+                }
+
+                Euro = CellValues.Number(value);
                 return true;
             case LineField.DealType:
                 if (value.Length == 0)

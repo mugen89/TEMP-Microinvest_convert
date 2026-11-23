@@ -1,4 +1,5 @@
 using System.Reflection;
+using MicroinvestConvert.Data;
 
 namespace MicroinvestConvert.App;
 
@@ -33,6 +34,13 @@ internal static class AppInfo
     /// <summary>Logs, downloads and previous versions: %LocalAppData%\MicroinvestConvert.</summary>
     public static string LocalFolder => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), FolderName);
+
+    /// <summary>The database is beside the program; with the logs, when that folder cannot be written.</summary>
+    public static IReadOnlyList<string> DatabasePaths =>
+    [
+        Path.Combine(Path.GetDirectoryName(Environment.ProcessPath ?? Application.ExecutablePath)!, Database.FileName),
+        Path.Combine(LocalFolder, Database.FileName),
+    ];
 
     public static Icon LoadIcon()
     {

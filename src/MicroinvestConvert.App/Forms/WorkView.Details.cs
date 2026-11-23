@@ -1,8 +1,10 @@
 using System.Globalization;
 using MicroinvestConvert.App.Ui;
+using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
 using MicroinvestConvert.Core.Output;
+using MicroinvestConvert.Core.Rules;
 
 namespace MicroinvestConvert.App.Forms;
 
@@ -22,6 +24,7 @@ internal sealed partial class WorkView
     private readonly Label _previewTitle = Make.Label("", Theme.Muted);
     private readonly Dictionary<int, LineField> _fieldOfLineColumn = [];
     private OperationDocument? _shown;
+    private int _euroColumn;
 
     private void BuildDetails()
     {
@@ -32,8 +35,9 @@ internal sealed partial class WorkView
         _lines.AddColumn(new() { Header = "Ред", Width = 48, Right = true, Get = l => l.SourceRow.ToString(CultureInfo.InvariantCulture), Tip = "Ред в Excel файла" });
         LineColumn(LineField.Account, "Сметка", 72);
         LineColumn(LineField.Analytic, "Аналит.", 76);
-        LineColumn(LineField.Base, "Основа", 82, right: true, get: l => Fmt.Money(l.Base));
+        LineColumn(LineField.Base, HasVat ? "Основа" : "По фактура", HasVat ? 82 : 96, right: true, get: l => Fmt.Money(l.Base));
         LineColumn(LineField.Vat, "ДДС", 72, right: true, get: l => Fmt.Money(l.Vat));
+        AddEuroColumn();
         _lines.AddColumn(new() { Header = "Ставка", Width = 76, Get = l => l.RateText, Tip = "% ДДС от файла" });
 
         var choices = DealTypes.ChoicesFor(IsPurchase ? DealSide.Purchase : DealSide.Sale)
@@ -102,6 +106,26 @@ internal sealed partial class WorkView
             Set = (l, v) => l.TrySet(field, v, out string error) ? null : error,
         })] = field;
 
+    // The amount of a row in another currency. In the foreign export it is in the file, and can be corrected.
+    private void AddEuroColumn()
+    {
+        _euroColumn = _lines.AddColumn(new()
+        {
+            Header = "В евро", Width = 84, Right = true,
+            Tip = HasVat ? "Цялата сума на реда в евро, по курса на документа"
+                : "Сумата на реда в евро – от файла (кол. AI) или по курса. Въведете друга, за да важи тя; изтрийте я, за да се превалутира по курса.",
+            Get = l => _shown != null && DocumentProcessor.EuroOf(_shown, l) is { } euro ? Fmt.Money(euro) : "",
+            Set = HasVat ? null : SetEuro,
+        });
+        if (!HasVat) _fieldOfLineColumn[_euroColumn] = LineField.Euro;
+    }
+
+    private string? SetEuro(LedgerLine line, string value)
+    {
+        if (_shown == null || _shown.CurrencyOf(line) == Currencies.Euro) return "Редът е в евро – поправете сумата „По фактура“.";
+        return line.TrySet(LineField.Euro, value, out string error) ? null : error;
+    }
+
     private static string? SetDeal(LedgerLine line, string value)
     {
         // Choosing what the rules chose is the same as „автоматично".
@@ -144,6 +168,13 @@ internal sealed partial class WorkView
         }
 
         _detailsTitle.Text = $"{_shown.DocType} {_shown.Title}";
+        bool euro = !HasVat || _shown.InForeignCurrency;
+        if (_lines.Columns[_euroColumn].Visible != euro)
+        {
+            _lines.SetRows([]);   // no current cell while its column may disappear
+            _lines.Columns[_euroColumn].Visible = euro;
+        }
+
         _lines.SetRows(_shown.Lines);
         _postings.SetRows(PostingsOf(_shown));
         _issues.SetRows(_shown.Issues.OrderByDescending(i => i.IsOpen).ThenByDescending(i => i.Severity));

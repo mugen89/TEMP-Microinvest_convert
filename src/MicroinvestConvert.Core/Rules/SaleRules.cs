@@ -129,5 +129,8 @@ internal static class RuleText
 
     public static string Money(decimal value) => value.ToString("0.00##", Bulgarian);
 
+    /// <summary>An exchange rate.</summary>
+    public static string Rate(decimal value) => Math.Round(value, 5).ToString("0.00###", Bulgarian);
+
     public static string Percent(decimal? rate) => rate is { } r ? r.ToString("0.##", Bulgarian) + "%" : "неизвестна ставка";
 }

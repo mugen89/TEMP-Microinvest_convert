@@ -60,8 +60,21 @@ found in them, the scripts that check them) goes to `private/`, which git ignore
   never many to many. The `%` shorthand of `Model.xls` is not used.
 - **Deal type 4 is legally „частичен данъчен кредит".** The owner's rule also
   uses it for a VAT that fits no rate, so such documents always carry a warning.
-- No currency conversion yet: a document in another currency is held back. What
-  is known about it, and about protocols, is in `docs/Later.md`.
+- **Everything is written in euro**, whatever the date (the owner, 2026-11-23). An
+  amount is **divided** by the units for one euro – never multiplied by the reverse
+  rate, which is rounded – and added up in its currency before that (`CurrencyRules`;
+  dust from dividing line by line once turned a zero total negative). Foreign
+  invoices keep the euro of column AI until another date or rate is chosen.
+- **A table of rates is kept under the date written on the page**, not the one that
+  was asked for: the site answers any day with its last table. When an earlier
+  table is the last word is in `RateCalendar.IsFinal`. A page that is not certainly
+  understood is refused (`KikInfoPage.Doubt`).
+- **What happens by itself says nothing**; only a button answers with a message. No
+  starting date = nothing is downloaded. Both are the owner's rules (`RatesService`).
+- **The database is beside the .exe** and is never committed (`*.db`). The schema
+  only grows: a new step at the end of `Database.Schema`, the old ones untouched. A
+  client needs only a name.
+- Protocols and other things put off are in `docs/Later.md`.
 - UI text is Bulgarian. Message boxes go through `Dialogs` (Bulgarian buttons).
 - Windows are laid out in code with table/flow panels at 96 DPI; every
   constructor ends with `EndLayout()` or nothing scales. `DataGridView` does not
@@ -72,12 +85,15 @@ found in them, the scripts that check them) goes to `private/`, which git ignore
 | Where | What |
 |---|---|
 | `Core/Source` | Excel reading (`WorkbookLoader`), recognition (`AiFile`), rows → documents (`AiReader`), column map (`AiColumns`) |
-| `Core/Model` | `OperationBatch` → `OperationDocument` → `LedgerLine` (one amount in one `LedgerBucket`); edits go through `TrySet` |
+| `Core/Model` | `OperationBatch` → `OperationDocument` → `LedgerLine` (one amount in one `LedgerBucket`, in the currency of its row); edits go through `TrySet` |
+| `Core/Exchange` | exchange rates: the page, the source, which days to ask for, one download (`docs/Currency.md`) |
 | `Core/Rules` | `DocumentProcessor` (run again after every edit), `PurchaseRules`, `SaleRules`, `ForeignRules`, `VatRates`, `VatCorrections`, accounts, dates, partners |
 | `Core/Output` | `OperationRows` (the texts of A..AA), `DeltaWorkbook` (write + read back and compare) |
-| `Core/Settings` | general settings, exceptions per client (by ЕИК), JSON store |
+| `Core/Settings` | general settings (JSON store), clients (`ClientBook`) |
+| `Data` | the database: `Database` (schema), `RateStore`, `ClientStore`, `SettingStore` |
 | `Core/Checks` | `CheckCatalog`: every check, its meaning, severity and the fields that answer it |
-| `App/Forms` | `MainForm` (start window, `IHub`), `ModuleCard`, `ModuleForm` (one window per module), `WorkView` (3 files), `SettingsForm`, `UpdateForm` |
+| `App` | `AppState` (settings, clients, rates), `RatesService` (when rates are downloaded, and who is told) |
+| `App/Forms` | `MainForm` (start window, `IHub`), `ModuleCard`, `ModuleForm` (one window per module), `WorkView` (3 files), `RatesForm`, `ClientsForm`, `SettingsForm`, `UpdateForm` |
 | `App/Forms/Checks` | `ChecksForm` and its pages; they talk to the opened file through `ICheckHost` |
 | `App/Ui` | `Grid<T>`, `FileDrop` (dropping files), `Controls`, `Theme` |
 | `App/Updates` | `UpdateService` (GitHub releases), `UpdateInstaller` (swap of the running .exe, kept versions), `Changelog` (CHANGELOG.md inside the program, for „Какво е ново" after an update) |
@@ -89,13 +105,17 @@ A new input format only has to produce an `OperationBatch`.
 ```
 dotnet test
 dotnet run --project src/MicroinvestConvert.App
-dotnet run --project tools/MicroinvestConvert.Cli -- <file> --rows --issues [--out x.xls] [--no-diary 1|3|skip] [--vat total|account]
+dotnet run --project tools/MicroinvestConvert.Cli -- <file> --rows --issues [--out x.xls] [--no-diary 1|3|skip] [--vat total|account] [--rates x.db]
+dotnet run --project tools/MicroinvestConvert.Cli -- rates x.db 01.01.2026
 dotnet publish src/MicroinvestConvert.App -p:PublishProfile=win-x64
 ```
 
+Run the tests alone: the windows of other programs starting meanwhile (a build, a
+publish) have made window tests wait for 60 seconds and fail.
+
 Pictures of every window (no client data leaves the machine):
-set `MICONVERT_SHOTS=<folder>` and `MICONVERT_FILES=<file>|<file>`, then
-`dotnet test --filter VisualTests`. A rehearsal of the update with two real
+set `MICONVERT_SHOTS=<folder>`, `MICONVERT_FILES=<file>|<file>` and
+`MICONVERT_DB=<a database with rates>`, then `dotnet test --filter VisualTests`. A rehearsal of the update with two real
 programs: `docs/Release.md`.
 
 Real samples are outside this repository (the parent folder's CLAUDE.md says

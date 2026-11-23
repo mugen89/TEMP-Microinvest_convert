@@ -85,6 +85,7 @@ internal sealed class VatPage : CheckPage
         _grid.AddColumn(new() { Header = "Дата", Width = 84, Get = g => Fmt.Date(g.Document.Date), SortKey = g => g.Document.Date });
         _grid.AddColumn(new() { Header = "Контрагент", Width = 130, Fill = true, Get = g => g.Document.PartnerName });
         _grid.AddColumn(new() { Header = "Колона", Width = 138, Get = g => LedgerBuckets.Title(g.Bucket) });
+        _grid.AddColumn(new() { Header = "Валута", Width = 70, Center = true, Get = g => string.Join("; ", g.Lines.Select(g.Document.CurrencyOf).Distinct()), Tip = "Сумите тук са във валутата на документа" });
         Money("Основа", g => g.Base);
         Money("ДДС", g => g.Vat);
         _grid.AddColumn(new() { Header = "Ставка", Width = 78, Right = true, Get = g => Percent(g.DeclaredRate), Tip = "Ставката във файла" });

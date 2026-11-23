@@ -218,6 +218,8 @@ internal sealed class AllChecksPage : CheckPage
         Field(DocField.Payment, "Плащане", 104, PaymentMethods.All.Select(PaymentMethods.Label).ToList(), v => v.Length == 0 ? "(няма)" : v);
         Field(DocField.CashAccount, "Каса", 78);
         Field(DocField.Currency, "Валута", 92);
+        Field(DocField.RateDate, "Дата на курса", 128);
+        Field(DocField.Rate, "Курс", 92);
         Field(DocField.Reason, "Основание", 180);
         Field(DocField.Vies, "VIES", 76);
 
@@ -235,7 +237,11 @@ internal sealed class AllChecksPage : CheckPage
                 return ok ? null : error;
             },
         });
-        _findings.AddColumn(new() { Header = "Общо", Width = 92, Right = true, Get = f => Fmt.Money(f.Document.TotalGross), SortKey = f => f.Document.TotalGross });
+        _findings.AddColumn(new()
+        {
+            Header = "Общо", Width = 92, Right = true, SortKey = f => f.Document.TotalGross, Tip = "В евро",
+            Get = f => f.Document.IsInEuro ? Fmt.Money(f.Document.TotalGross) : "",
+        });
         _findings.AddColumn(new() { Header = "Какво е намерено", Width = 220, Fill = true, Get = f => f.Issue.Message });
 
         _findings.StyleCell = (f, column, style) =>
@@ -263,10 +269,17 @@ internal sealed class AllChecksPage : CheckPage
         _columnOf[field] = _findings.AddColumn(new()
         {
             Header = header, Width = width, Items = items, ItemLabel = label,
-            Get = f => field == DocField.AccountingDate ? Fmt.Date(f.Document.AccountingDate) : f.Document.GetText(field),
+            Get = f => field switch
+            {
+                DocField.AccountingDate => Fmt.Date(f.Document.AccountingDate),
+                DocField.RateDate => Fmt.Date(f.Document.RateDate),
+                DocField.Rate => string.Join("; ", f.Document.Conversions.Where(c => c.PerEuro > 0m).Select(c => Fmt.Rate(c.PerEuro))),
+                _ => f.Document.GetText(field),
+            },
             SortKey = field switch
             {
                 DocField.Date => f => f.Document.Date,
+                DocField.RateDate => f => f.Document.RateDate,
                 DocField.Period => f => f.Document.Period,
                 DocField.AccountingDate => f => f.Document.AccountingDate,
                 _ => null,

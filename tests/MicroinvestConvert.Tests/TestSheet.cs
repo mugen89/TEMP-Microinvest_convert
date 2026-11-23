@@ -1,3 +1,4 @@
+using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Rules;
 using MicroinvestConvert.Core.Settings;
@@ -163,16 +164,16 @@ internal sealed class TestSheet
         return path;
     }
 
-    public OperationBatch Process(ConverterSettings? settings = null, ClientSettings? client = null)
+    public OperationBatch Process(ConverterSettings? settings = null, ClientSettings? client = null, IExchangeRates? rates = null)
     {
         var batch = Read();
-        new DocumentProcessor(new ConverterOptions(settings ?? new ConverterSettings(), client)).Process(batch);
+        new DocumentProcessor(new ConverterOptions(settings ?? new ConverterSettings(), client), rates).Process(batch);
         return batch;
     }
 
     /// <summary>The only document of the sheet, processed.</summary>
-    public OperationDocument Single(ConverterSettings? settings = null, ClientSettings? client = null) =>
-        Assert.Single(Process(settings, client).Documents);
+    public OperationDocument Single(ConverterSettings? settings = null, ClientSettings? client = null, IExchangeRates? rates = null) =>
+        Assert.Single(Process(settings, client, rates).Documents);
 
     public static int IndexOf(string letters)
     {

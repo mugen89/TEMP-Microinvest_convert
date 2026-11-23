@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MicroinvestConvert.Core\MicroinvestConvert.Core.csproj" />
+    <ProjectReference Include="..\..\src\MicroinvestConvert.Data\MicroinvestConvert.Data.csproj" />
     <ProjectReference Include="..\..\src\MicroinvestConvert.App\MicroinvestConvert.App.csproj" />
   </ItemGroup>
 

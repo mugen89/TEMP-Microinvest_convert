@@ -31,7 +31,7 @@ internal static class Program
         using var updates = new UpdateService(AppInfo.Version);
         if (args is ["--update"]) return UpdateWithoutWindow(updates);
 
-        var app = new AppState(AppInfo.SettingsPath);
+        using var app = new AppState(AppInfo.SettingsPath, AppInfo.DatabasePaths);
         using (var main = new MainForm(app, updates, replaced))
         {
             // A file dragged onto the .exe, or opened „с програмата".

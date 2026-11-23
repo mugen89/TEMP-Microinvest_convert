@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The database of the program (SQLite): exchange rates, clients, its own settings. The
+       engine does not know about it – the web edition keeps the same things elsewhere. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>MicroinvestConvert.Data</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.23" />
+    <!-- Newer than the one it asks for: SQLite itself with its latest fixes. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MicroinvestConvert.Core\MicroinvestConvert.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MicroinvestConvert.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -306,6 +306,10 @@ internal static class Fmt
     public static readonly CultureInfo Bulgarian = CultureInfo.GetCultureInfo("bg-BG");
 
     public static string Money(decimal value) => value.ToString("#,##0.00", Bulgarian);
+
+    /// <summary>An exchange rate: at least four decimals, more where they matter.</summary>
+    public static string Rate(decimal value) => Math.Round(value, value < 0.01m ? 8 : 6).ToString("#,##0.0000####", Bulgarian);
+
     public static string Date(DateTime? value) => value?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? "";
 
     /// <summary>„1 документ", „5 документа".</summary>
@@ -352,6 +356,21 @@ internal static class Dialogs
         AllowCancel = true,
     };
 
-    private static TaskDialogButton ShowPage(IWin32Window? owner, TaskDialogPage page) =>
-        owner != null ? TaskDialog.ShowDialog(owner, page) : TaskDialog.ShowDialog(page);
+    /// <summary>
+    /// For the tests, where nobody answers: gets the heading and the text instead of the user, and
+    /// the last button is „pressed". Per thread, because tests run side by side.
+    /// </summary>
+    [ThreadStatic]
+    internal static Action<string, string>? Instead;
+
+    private static TaskDialogButton ShowPage(IWin32Window? owner, TaskDialogPage page)
+    {
+        if (Instead is { } instead)
+        {
+            instead(page.Heading ?? "", page.Text ?? "");
+            return page.Buttons[^1];
+        }
+
+        return owner != null ? TaskDialog.ShowDialog(owner, page) : TaskDialog.ShowDialog(page);
+    }
 }

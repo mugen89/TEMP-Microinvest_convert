@@ -40,7 +40,7 @@ internal sealed class PartnersPage : CheckPage
         Column(DocField.VatNumber, "✎ ДДС №", 132, r => r.Vat);
         _grid.AddColumn(new() { Header = "Държава", Width = 80, Center = true, Get = r => new PartnerIdentity(r.Eik, r.Vat).Prefix, Tip = "Кодът в началото на ДДС номера" });
         _grid.AddColumn(new() { Header = "Документи", Width = 100, Right = true, Get = r => r.Documents.Count.ToString(CultureInfo.InvariantCulture), SortKey = r => r.Documents.Count });
-        _grid.AddColumn(new() { Header = "Общо", Width = 104, Right = true, Get = r => Fmt.Money(r.Documents.Sum(d => d.TotalGross)), SortKey = r => r.Documents.Sum(d => d.TotalGross) });
+        _grid.AddColumn(new() { Header = "Общо", Width = 104, Right = true, Get = r => Fmt.Money(Total(r)), SortKey = r => Total(r), Tip = "В евро, без документите, които чакат курс" });
         _grid.AddColumn(new() { Header = "Бележка", Width = 300, Fill = true, Get = r => r.Found });
         _grid.StyleCell = (row, column, style) =>
         {
@@ -59,6 +59,8 @@ internal sealed class PartnersPage : CheckPage
             _onlyFound, _grid));
         EndLayout();
     }
+
+    private static decimal Total(Row row) => row.Documents.Where(d => d.IsInEuro).Sum(d => d.TotalGross);
 
     private void Column(DocField field, string header, int width, Func<Row, string> get) => _grid.AddColumn(new()
     {

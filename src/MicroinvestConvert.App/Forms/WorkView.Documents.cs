@@ -1,5 +1,6 @@
 using System.Globalization;
 using MicroinvestConvert.App.Ui;
+using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
 
@@ -10,7 +11,8 @@ internal sealed partial class WorkView
 {
     private readonly Grid<OperationDocument> _documents = new();
     private readonly Dictionary<int, DocField> _fieldOfColumn = [];
-    private int _statusColumn, _dealColumn;
+    private readonly List<int> _currencyColumns = [];
+    private int _statusColumn, _dealColumn, _rateFromColumn;
 
     private readonly Label _selected = Make.Label("", font: Theme.Bold);
     private readonly ComboBox _bulkField = Make.Combo(165);
@@ -43,8 +45,8 @@ internal sealed partial class WorkView
             Set = (d, v) => d.TrySet(DocField.AccountingDate, v, out string error) ? null : error,
         });
         _fieldOfColumn[_documents.Columns.Count - 1] = DocField.AccountingDate;
-        Field(DocField.PartnerName, IsPurchase ? "Доставчик" : "Клиент", 190, tip: "D · Партньор");
-        Field(DocField.Eik, "ЕИК", HasVat ? 92 : 132, tip: "E · Булстат/ЕИК. Петнадесет деветки – няма номер.");
+        Field(DocField.PartnerName, IsPurchase ? "Доставчик" : "Клиент", 174, tip: "D · Партньор");
+        Field(DocField.Eik, "ЕИК", HasVat ? 92 : 126, tip: "E · Булстат/ЕИК. Петнадесет деветки – няма номер.");
         Field(DocField.VatNumber, "ДДС №", 108, tip: "F · ДДС номер");
 
         if (HasVat)
@@ -53,9 +55,8 @@ internal sealed partial class WorkView
             Money("ДДС", d => d.TotalVat, "ДДС, както ще се запише");
         }
 
-        Money("Общо", d => d.TotalGross, HasVat ? "Общо по документа" : "Сумата в евро, както ще се запише");
-        if (!HasVat)
-            _documents.AddColumn(new() { Header = "По фактура", Width = 116, Right = true, Get = InvoiceAmount, Tip = "Сумата във валутата на фактурата" });
+        Money("Общо", d => d.TotalGross, "Общо по документа в евро, както ще се запише");
+        AddCurrencyColumns();
         _dealColumn = _documents.AddColumn(new()
         {
             Header = "Вид", Width = 62, Center = true, Tip = "N · Вид сделка. Променя се в редовете на документа или от лентата „Задай“.",
@@ -82,7 +83,6 @@ internal sealed partial class WorkView
         Field(DocField.CashReason, "Основание на плащането", 190, tip: "K · Основание на реда " + (IsPurchase ? "РКО" : "ПКО"));
         Field(DocField.Note, "Забележка", 130, tip: "L · Забележка");
         Field(DocField.Note2, "Втора забележка", 130, tip: "M · Втора забележка");
-        Field(DocField.Currency, "Валута", 74);
         Field(DocField.Period, "Период", 78, sort: d => d.Period, tip: "Данъчен период от файла");
 
         _documents.Columns[3].Frozen = true;
@@ -105,11 +105,80 @@ internal sealed partial class WorkView
         _fieldOfColumn[column] = field;
     }
 
+    // While a rate is missing there is no amount in euro.
     private void Money(string header, Func<OperationDocument, decimal> value, string tip) =>
-        _documents.AddColumn(new() { Header = header, Width = 88, Right = true, Tip = tip, Get = d => Fmt.Money(value(d)), SortKey = d => value(d) });
+        _documents.AddColumn(new()
+        {
+            Header = header, Width = 88, Right = true, Tip = tip, SortKey = d => value(d),
+            Get = d => d.IsInEuro ? Fmt.Money(value(d)) : "",
+        });
 
-    private static string InvoiceAmount(OperationDocument doc) => string.Join("; ", doc.Lines.GroupBy(l => l.InvoiceCurrency)
-        .Select(g => $"{Fmt.Money(g.Sum(l => l.InvoiceTotal))} {g.Key}"));
+    // ----- currency -----
+
+    private void AddCurrencyColumns()
+    {
+        _currencyColumns.Add(_documents.AddColumn(new()
+        {
+            Header = "По фактура", Width = 96, Right = true, Get = InvoiceAmount, Tip = "Сумата на документ във валута",
+        }));
+        Field(DocField.Currency, "Валута", 70, tip: "Валутата на сумите във файла. Записва се в евро.");
+        _currencyColumns.Add(_documents.AddColumn(new()
+        {
+            Header = "Дата на курса", Width = 108, SortKey = d => UsesDate(d) ? d.RateDate : null,
+            Tip = "Датата, за която се взема курсът – датата на документа. Въведете друга, за да се превалутира по нейния курс; изтрийте я, за да се върне.",
+            Get = d => UsesDate(d) ? Fmt.Date(d.RateDate) : "",
+            Set = (d, v) => d.TrySet(DocField.RateDate, v, out string error) ? null : error,
+        }));
+        _fieldOfColumn[_currencyColumns[^1]] = DocField.RateDate;
+        _currencyColumns.Add(_documents.AddColumn(new()
+        {
+            Header = "Курс", Width = 76, Right = true, Get = RateText,
+            Tip = "Колко единици валута са едно евро. Въведете друг курс, ако официалният не е нужният; изтрийте го, за да се върне.",
+            Set = (d, v) => d.TrySet(DocField.Rate, v, out string error) ? null : error,
+        }));
+        _fieldOfColumn[_currencyColumns[^1]] = DocField.Rate;
+        _rateFromColumn = _documents.AddColumn(new()
+        {
+            Header = "Курс от", Width = 88, Get = RateFrom,
+            Tip = "Деня, в който е публикуван курсът – в почивни дни важи последният. „файла“ – сумата в евро е от колона AI.",
+        });
+        _currencyColumns.Add(_rateFromColumn);
+    }
+
+    /// <summary>A file in euro only has nothing to show there.</summary>
+    private void ShowCurrencyColumns()
+    {
+        bool show = !HasVat || Batch.Documents.Any(d => d.InForeignCurrency);
+        if (_documents.Columns[_currencyColumns[0]].Visible == show) return;
+        _documents.SetRows([]);   // no current cell while its column may disappear
+        foreach (int column in _currencyColumns) _documents.Columns[column].Visible = show;
+        RefreshDocuments();
+    }
+
+    private static bool UsesDate(OperationDocument doc) => doc.ForeignCurrencies.Any(c => c != Currencies.Lev);
+
+    private static string InvoiceAmount(OperationDocument doc)
+    {
+        if (!doc.InForeignCurrency) return "";
+        var sums = doc.Lines.GroupBy(doc.CurrencyOf).Select(g => (Currency: g.Key, Amount: Fmt.Money(g.Sum(l => l.Gross)))).ToList();
+        return sums.Count == 1 ? sums[0].Amount : string.Join("; ", sums.Select(s => $"{s.Amount} {s.Currency}"));
+    }
+
+    private static string RateText(OperationDocument doc) =>
+        string.Join("; ", doc.Conversions.Where(c => c.PerEuro > 0m).Select(c => Fmt.Rate(c.PerEuro)));
+
+    private string RateFrom(OperationDocument doc)
+    {
+        if (!doc.IsInEuro) return doc.UnknownRateDay != null && _app.Rates.IsRunning ? "изтегля се…" : "няма курс";
+        return string.Join("; ", doc.Conversions.Select(c => c.Origin switch
+        {
+            _ when doc.Lines.Exists(l => l.Euro != null && l.IsEdited(LineField.Euro)) => "въведена сума",
+            RateOrigin.File => "файла",
+            RateOrigin.ByHand => "въведен",
+            RateOrigin.Fixed => "фиксиран",
+            _ => Fmt.Date(c.Published),
+        }).Distinct());
+    }
 
     private static IComparable NumberKey(string index) =>
         decimal.TryParse(index, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal n) ? n : decimal.MaxValue;
@@ -148,6 +217,10 @@ internal sealed partial class WorkView
         {
             style.Font = Theme.Bold;
             if (doc.Lines.Any(l => l.DealTypeOverride != null)) style.ForeColor = Theme.EditedInk;
+        }
+        else if (column == _rateFromColumn && rank is not (0 or 3))
+        {
+            style.ForeColor = Theme.Muted;
         }
     }
 
@@ -188,6 +261,8 @@ internal sealed partial class WorkView
             ("Вид сделка", null),
             ("Тип документ", DocField.DocType),
             ("Сч. дата", DocField.AccountingDate),
+            ("Дата на курса", DocField.RateDate),
+            ("Курс", DocField.Rate),
             (IsPurchase ? "Кт сметка" : "Дт сметка", DocField.CounterAccount),
             ("Плащане", DocField.Payment),
             ("Каса", DocField.CashAccount),
@@ -261,9 +336,17 @@ internal sealed partial class WorkView
         string value = _bulkValue.Text.Trim();
         if (value == "автоматично") value = "";
 
-        if (value.Length == 0 && field is not (null or DocField.Vies or DocField.AccountingDate) &&
+        if (value.Length == 0 && field is not (null or DocField.Vies or DocField.AccountingDate or DocField.RateDate or DocField.Rate) &&
             !Dialogs.Ask(this, $"Да изчистя ли „{label}“?", $"Полето ще остане празно в {Fmt.Documents(chosen.Count)}.", "Изчисти", "Отказ", warning: true))
             return;
+
+        // A rate says nothing to a document in euro.
+        if (field is DocField.RateDate or DocField.Rate) chosen = chosen.Where(d => d.InForeignCurrency).ToList();
+        if (chosen.Count == 0)
+        {
+            Dialogs.Info(this, "Няма избран документ във валута", "Избраните документи са в евро.");
+            return;
+        }
 
         var errors = new List<string>();
         foreach (var doc in chosen)

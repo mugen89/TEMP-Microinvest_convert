@@ -221,9 +221,9 @@ public sealed class InteractionTests : IDisposable
         Click(page, "Запомни");
 
         Assert.Equal("401/1", batch.Documents[0].CounterAccountOut);
-        var saved = new AppState(_settings).Settings;
-        Assert.Equal("401/1", saved.Clients[batch.ClientEik].Accounts["401"]);
-        Assert.Empty(saved.General.Accounts);
+        var saved = new AppState(_settings);
+        Assert.Equal("401/1", saved.Clients.Find(batch.ClientEik, "")!.Accounts["401"]);
+        Assert.Empty(saved.Settings.General.Accounts);
     });
 
     [Fact]
@@ -263,12 +263,12 @@ public sealed class InteractionTests : IDisposable
         var page = OpenPage<AllChecksPage>(view, "Проверки (2)");
         var checks = (DataGridView)Field<Control>(page, "_checks");
         Assert.Equal(Core.Checks.CheckCatalog.For(OperationKind.Purchase).Count(), checks.RowCount);
-        Assert.Equal("Сумите не са във валутата на книгите", checks[2, 0].Value);   // an error
+        Assert.Equal("Няма курс към еврото", checks[2, 0].Value);                   // an error
         Assert.Equal("ДДС не отговаря на ставка", checks[2, 1].Value);              // a warning
 
         Field<CheckBox>(page, "_onlyFound").Checked = true;
         Pump();
-        Assert.Equal(["Сумите не са във валутата на книгите", "ДДС не отговаря на ставка"],
+        Assert.Equal(["Няма курс към еврото", "ДДС не отговаря на ставка"],
             Enumerable.Range(0, 2).Select(r => (string)checks[2, r].Value!));
         Assert.True(checks.RowCount < 6);
     });
@@ -278,7 +278,7 @@ public sealed class InteractionTests : IDisposable
     {
         var page = OpenPage<AllChecksPage>(view, "Проверки (2)");
         var findings = (DataGridView)Field<Control>(page, "_findings");
-        Choose(page, IssueCode.ForeignCurrency);
+        Choose(page, IssueCode.MissingRate);
         Assert.Equal(1, findings.RowCount);
         int currency = Enumerable.Range(0, findings.ColumnCount).Single(c => findings.Columns[c].HeaderText == "✎ Валута");
         Assert.True(findings.Columns[currency].Visible);
@@ -331,8 +331,8 @@ public sealed class InteractionTests : IDisposable
         Assert.False(new AppState(_settings).Settings.General.IsOff(IssueCode.VatUnresolved));
 
         var general = new Core.Settings.ConverterSettings();
-        general.SetOff(IssueCode.ForeignCurrency, true);
-        Assert.False(general.IsOff(IssueCode.ForeignCurrency));
+        general.SetOff(IssueCode.MissingRate, true);
+        Assert.False(general.IsOff(IssueCode.MissingRate));
     });
 
     [Fact]
@@ -439,13 +439,13 @@ public sealed class InteractionTests : IDisposable
             Click(form, "Запази");
         }
 
-        var saved = new AppState(_settings).Settings;
-        Assert.Equal("453/1/9", saved.OptionsFor(batch.ClientEik).PurchaseVatAccount);
-        Assert.Equal("453/1", saved.OptionsFor("111111111").PurchaseVatAccount);
-        Assert.Equal(Core.Settings.DealTypeFormat.SingleWhenEqual, saved.General.DealTypeFormat);
-        Assert.Equal(Core.Settings.NoDiaryMode.Skip, saved.General.NoDiary);
+        var saved = new AppState(_settings);
+        Assert.Equal("453/1/9", saved.OptionsFor(batch).PurchaseVatAccount);
+        Assert.Single(saved.Clients.All);
+        Assert.Equal(Core.Settings.DealTypeFormat.SingleWhenEqual, saved.Settings.General.DealTypeFormat);
+        Assert.Equal(Core.Settings.NoDiaryMode.Skip, saved.Settings.General.NoDiary);
 
-        OnScreenNow(saved, batch, view => Assert.Equal("ДДС сметка: 453/1/9", Field<Label>(view, "_exception").Text));
+        OnScreenNow(batch, view => Assert.Equal("ДДС сметка: 453/1/9", Field<Label>(view, "_exception").Text));
     });
 
     [Fact]
@@ -453,7 +453,8 @@ public sealed class InteractionTests : IDisposable
     {
         var app = NewApp();
         app.Settings.General.Accounts["401"] = "401/1";
-        app.Settings.ClientFor("987654326", "Тестова Фирма ЕООД")!.Accounts["601/5"] = "601/9";
+        var client = new Core.Settings.ClientSettings { Name = "Тестова Фирма ЕООД", Eik = "987654326", Accounts = { ["601/5"] = "601/9" }, AccountCurrencies = { ["4011"] = "USD" } };
+        app.Save(client);
         app.Save();
         string before = File.ReadAllText(_settings);
 
@@ -461,6 +462,8 @@ public sealed class InteractionTests : IDisposable
         Show(form);
         Click(form, "Запази");
         Assert.Equal(before, File.ReadAllText(_settings));
+        client = Assert.Single(new AppState(_settings).Clients.All);
+        Assert.Equal(("601/9", "USD"), (client.Accounts["601/5"], client.AccountCurrencies["4011"]));
     });
 
     // ----- operating -----
@@ -528,10 +531,9 @@ public sealed class InteractionTests : IDisposable
         act(view, batch);
     });
 
-    private void OnScreenNow(Core.Settings.SettingsFile settings, OperationBatch batch, Action<WorkView> act)
+    private void OnScreenNow(OperationBatch batch, Action<WorkView> act)
     {
         var app = new AppState(_settings);
-        Assert.Equal(settings.Clients.Count, app.Settings.Clients.Count);
         using var form = new Form { ClientSize = new Size(1300, 800) };
         using var view = new WorkView(app, batch);
         form.Controls.Add(view);

@@ -13,36 +13,15 @@ public sealed class SettingsFile
     public int Version { get; set; } = CurrentVersion;
     public ConverterSettings General { get; set; } = new();
 
-    /// <summary>Exceptions per client, by ЕИК.</summary>
-    public Dictionary<string, ClientSettings> Clients { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// The exceptions per client, by ЕИК, as they were kept before there was a database. Read
+    /// into it once, and left here for a program that goes back to such a version.
+    /// </summary>
+    public Dictionary<string, ClientBeforeDatabase> Clients { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public bool OpenAfterSave { get; set; } = true;
     public bool CheckForUpdates { get; set; } = true;
     public List<string> RecentFiles { get; set; } = [];
-
-    public ConverterOptions OptionsFor(string? clientEik)
-    {
-        ClientSettings? client = null;
-        if (!string.IsNullOrWhiteSpace(clientEik)) Clients.TryGetValue(clientEik.Trim(), out client);
-        return new ConverterOptions(General, client);
-    }
-
-    /// <summary>The exceptions of a client, created when missing. Null without an ЕИК.</summary>
-    public ClientSettings? ClientFor(string? clientEik, string? name)
-    {
-        if (string.IsNullOrWhiteSpace(clientEik)) return null;
-        string key = clientEik.Trim();
-        if (!Clients.TryGetValue(key, out var client)) Clients[key] = client = new ClientSettings();
-        if (!string.IsNullOrWhiteSpace(name)) client.Name = name;
-        return client;
-    }
-
-    /// <summary>Clients without exceptions are not worth keeping.</summary>
-    public void DropEmptyClients()
-    {
-        foreach (string key in Clients.Where(c => c.Value.IsEmpty).Select(c => c.Key).ToList())
-            Clients.Remove(key);
-    }
 
     public void AddRecent(string path)
     {
@@ -50,6 +29,24 @@ public sealed class SettingsFile
         RecentFiles.Insert(0, path);
         if (RecentFiles.Count > 8) RecentFiles.RemoveRange(8, RecentFiles.Count - 8);
     }
+}
+
+/// <summary>What 1.1 and earlier kept for a client.</summary>
+public sealed class ClientBeforeDatabase
+{
+    public string Name { get; set; } = "";
+    public string PurchaseVatAccount { get; set; } = "";
+    public string SaleVatAccount { get; set; } = "";
+    public Dictionary<string, string> Accounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public ClientSettings ToClient(string eik) => new()
+    {
+        Name = Name.Length > 0 ? Name : eik,
+        Eik = eik,
+        PurchaseVatAccount = PurchaseVatAccount,
+        SaleVatAccount = SaleVatAccount,
+        Accounts = new Dictionary<string, string>(Accounts, StringComparer.OrdinalIgnoreCase),
+    };
 }
 
 /// <summary>Loads and saves the settings as JSON. A damaged file never stops the program.</summary>
@@ -87,7 +84,6 @@ public sealed class SettingsStore(string path)
 
     public void Save(SettingsFile file)
     {
-        file.DropEmptyClients();
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
 
         // Written aside and swapped in, so a power cut cannot leave half a file.
@@ -117,6 +113,7 @@ public sealed class SettingsStore(string path)
         g.SaleVatAccount = Or(g.SaleVatAccount, ConverterSettings.DefaultSaleVatAccount);
         g.DefaultCashAccount ??= "";
         g.Accounts = new Dictionary<string, string>(g.Accounts ?? [], StringComparer.OrdinalIgnoreCase);
+        g.AccountCurrencies = new Dictionary<string, string>(g.AccountCurrencies ?? [], StringComparer.OrdinalIgnoreCase);
         g.ChecksOff = (g.ChecksOff ?? []).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
         g.TolerancePerLine = Math.Clamp(g.TolerancePerLine, 0m, 1m);
         g.TolerancePerDocument = Math.Clamp(g.TolerancePerDocument, 0m, 10m);
@@ -129,7 +126,7 @@ public sealed class SettingsStore(string path)
             file.Version = SettingsFile.CurrentVersion;
         }
 
-        var clients = new Dictionary<string, ClientSettings>(StringComparer.OrdinalIgnoreCase);
+        var clients = new Dictionary<string, ClientBeforeDatabase>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, client) in file.Clients ?? [])
         {
             if (client is null || string.IsNullOrWhiteSpace(key)) continue;

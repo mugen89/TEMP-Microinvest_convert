@@ -42,7 +42,7 @@ internal sealed class ModuleForm : AppForm
         Kind = kind;
         _palette = Palette.For(kind);
 
-        ClientSize = new Size(1360, 800);
+        ClientSize = new Size(1460, 800);
         MinimumSize = new Size(1140, 620);
         StartPosition = FormStartPosition.Manual;
         KeyPreview = true;

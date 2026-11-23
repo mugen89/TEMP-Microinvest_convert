@@ -1,4 +1,5 @@
 using System.Globalization;
+using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Nomenclature;
 using MicroinvestConvert.Core.Values;
 
@@ -16,6 +17,8 @@ public enum DocField
     Eik,
     VatNumber,
     Currency,
+    RateDate,
+    Rate,
     Payment,
     CounterAccount,
     CashAccount,
@@ -55,7 +58,15 @@ public sealed class OperationDocument
     public string PartnerName { get; set; } = "";
     public string Eik { get; set; } = "";
     public string VatNumber { get; set; } = "";
+
+    /// <summary>The currency of the amounts. Set by hand it stands for every row.</summary>
     public string Currency { get; set; } = "";
+
+    /// <summary>The day whose exchange rate is used; null = the date of the document.</summary>
+    public DateTime? RateDateOverride { get; set; }
+
+    /// <summary>Units of the currency for one euro, typed in; null = the official rate.</summary>
+    public decimal? RateOverride { get; set; }
     public PaymentMethod Payment { get; set; }
 
     private string _counterAccount = "", _cashAccount = "";
@@ -84,6 +95,12 @@ public sealed class OperationDocument
     /// <summary>Column C, and column P.</summary>
     public DateTime? AccountingDate { get; internal set; }
 
+    /// <summary>How the amounts in other currencies became euro, one for every currency.</summary>
+    public IReadOnlyList<Conversion> Conversions { get; internal set; } = [];
+
+    /// <summary>A day whose rates have not been downloaded, and are needed to convert or to compare with.</summary>
+    public DateTime? UnknownRateDay { get; internal set; }
+
     /// <summary>The amounts and accounts of columns A and B, in their order.</summary>
     public IReadOnlyList<EntrySegment> Segments { get; internal set; } = [];
     public IReadOnlyList<VatGroup> VatGroups { get; internal set; } = [];
@@ -93,9 +110,17 @@ public sealed class OperationDocument
     public string CounterAccountOut { get; internal set; } = "";
     public string CashAccountOut { get; internal set; } = "";
 
+    /// <summary>The currency those accounts are kept in, in Делта Pro; empty when they are not.</summary>
+    public string CounterCurrency { get; internal set; } = "";
+    public string CashCurrency { get; internal set; } = "";
+
+    /// <summary>In euro.</summary>
     public decimal TotalBase { get; internal set; }
     public decimal TotalVat { get; internal set; }
     public decimal TotalGross { get; internal set; }
+
+    /// <summary>The whole document in its currency; null when it is in euro, or in several.</summary>
+    public decimal? TotalInCurrency { get; internal set; }
 
     /// <summary>Left out because of the „без дневник" setting.</summary>
     public bool SkippedBySetting { get; internal set; }
@@ -109,6 +134,29 @@ public sealed class OperationDocument
     public bool WillExport => Export && !SkippedBySetting && !HasErrors;
 
     public bool IsCash => Payment == PaymentMethod.Cash;
+
+    /// <summary>The currency of the amounts of a row.</summary>
+    public string CurrencyOf(LedgerLine line) =>
+        (IsEdited(DocField.Currency) || line.Currency.Length == 0 ? Currency : line.Currency) is { Length: > 0 } code ? code : Currencies.Euro;
+
+    /// <summary>The currencies of the rows that are not in euro, in their order.</summary>
+    public IReadOnlyList<string> ForeignCurrencies => Lines.Select(CurrencyOf).Where(c => c != Currencies.Euro).Distinct().ToList();
+
+    /// <summary>Some amount has to become euro.</summary>
+    public bool InForeignCurrency => Lines.Exists(l => CurrencyOf(l) != Currencies.Euro);
+
+    /// <summary>Every amount is in euro: it was, or it has been converted.</summary>
+    public bool IsInEuro => ForeignCurrencies.All(c => Conversions.Any(x => x.Currency == c));
+
+    /// <summary>The day of the exchange rate.</summary>
+    public DateTime? RateDate => RateDateOverride ?? Date;
+
+    /// <summary>The conversion of a row; null when it is in euro, or nothing is known.</summary>
+    public Conversion? ConversionOf(LedgerLine line)
+    {
+        string currency = CurrencyOf(line);
+        return Conversions.FirstOrDefault(c => c.Currency == currency);
+    }
 
     /// <summary>The distinct deal types of the document, in the order of its amounts.</summary>
     public IEnumerable<int> DealTypesUsed => Segments.Select(s => s.DealType).Distinct();
@@ -202,6 +250,8 @@ public sealed class OperationDocument
         DocField.Eik => Eik,
         DocField.VatNumber => VatNumber,
         DocField.Currency => Currency,
+        DocField.RateDate => RateDateOverride?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "",
+        DocField.Rate => RateOverride?.ToString("0.##########", CultureInfo.InvariantCulture) ?? "",
         DocField.Payment => PaymentMethods.Label(Payment),
         DocField.CounterAccount => CounterAccount,
         DocField.CashAccount => CashAccount,
@@ -269,7 +319,26 @@ public sealed class OperationDocument
                 VatNumber = value.ToUpperInvariant();
                 return true;
             case DocField.Currency:
-                Currency = value.ToUpperInvariant();
+                Currency = Currencies.Normalise(value);
+                return true;
+
+            case DocField.RateDate:
+                return SetDate(value, d => RateDateOverride = d, out error);
+
+            case DocField.Rate:
+                if (value.Length == 0)
+                {
+                    RateOverride = null;
+                    return true;
+                }
+
+                if (CellValues.Number(value) is not { } rate || rate <= 0m)
+                {
+                    error = $"„{value}“ не е курс. Въведете колко единици валута са едно евро, например 1,1616.";
+                    return false;
+                }
+
+                RateOverride = rate;
                 return true;
 
             case DocField.Payment:
@@ -362,11 +431,14 @@ public sealed class EntrySegment
     public required int Vies { get; init; }
     public required IReadOnlyList<LedgerLine> Lines { get; init; }
 
-    /// <summary>Before rounding.</summary>
+    /// <summary>Before rounding, in euro.</summary>
     internal decimal Raw { get; init; }
 
-    /// <summary>In cents, as written in column A.</summary>
+    /// <summary>In euro and cents, as written in column A.</summary>
     public decimal Amount { get; internal set; }
+
+    /// <summary>The same in the currency of its rows; null when they are in euro, or in several currencies.</summary>
+    public decimal? InCurrency { get; init; }
 }
 
 public enum VatStatus

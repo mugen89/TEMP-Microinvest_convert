@@ -91,7 +91,7 @@ public enum LedgerBucket
     /// <summary>An amount with nothing in the ledger columns.</summary>
     SaleNoDiary,
 
-    /// <summary>An invoice of the foreign export, in EUR.</summary>
+    /// <summary>An invoice of the foreign export: one amount, without VAT.</summary>
     Foreign,
 }
 
@@ -115,7 +115,7 @@ public static class LedgerBuckets
         LedgerBucket.SaleUntaxedNonEu => "AJ · необл. извън ЕС",
         LedgerBucket.SaleExempt => "освободена",
         LedgerBucket.SaleNoDiary => "няма",
-        LedgerBucket.Foreign => "AI · сума в евро",
+        LedgerBucket.Foreign => "Z · обща сума",
         _ => bucket.ToString(),
     };
 
@@ -178,15 +178,20 @@ public enum IssueCode
     BadAccount,
 
     // amounts
-    ForeignCurrency,
     AmountsDoNotAdd,
     ZeroDocument,
     NegativeDocument,
     SignFlipped,
+    SellerVatIncluded,
+
+    // currency
+    MissingRate,
+    RateDiffers,
     EuroTotalDiffers,
     EuroRate,
+    AccountCurrency,
+    CreditNoteRate,
     ConvertedToEuro,
-    SellerVatIncluded,
 
     // VAT
     VatUnresolved,

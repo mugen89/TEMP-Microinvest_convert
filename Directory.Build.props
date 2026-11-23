@@ -1,7 +1,7 @@
 <Project>
   <!-- One version for the whole solution. A release tag must match it: v$(Version). -->
   <PropertyGroup>
-    <Version>1.1.1</Version>
+    <Version>1.2.0</Version>
     <Product>Microinvest Convert</Product>
     <NeutralLanguage>bg</NeutralLanguage>
     <LangVersion>latest</LangVersion>

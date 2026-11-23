@@ -1,4 +1,5 @@
 using MicroinvestConvert.App.Ui;
+using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Rules;
 using MicroinvestConvert.Core.Settings;
@@ -10,7 +11,7 @@ namespace MicroinvestConvert.App.Forms.Checks;
 internal sealed class AccountsPage : CheckPage
 {
     public const string PageTitle = "Сметки";
-    private const int TargetColumn = 4;
+    private const int TargetColumn = 4, CurrencyColumn = 5;
 
     private sealed class Row
     {
@@ -25,8 +26,12 @@ internal sealed class AccountsPage : CheckPage
         public required string Original { get; init; }
         public string Target { get; set; } = "";
 
+        /// <summary>The currency the account is kept in; empty = it is an ordinary account.</summary>
+        public required string OriginalCurrency { get; init; }
+        public string Currency { get; set; } = "";
+
         public string Key => AccountText.Join(Account, Analytic);
-        public bool Changed => Target != Original;
+        public bool Changed => Target != Original || Currency != OriginalCurrency;
     }
 
     private readonly Grid<Row> _grid = new();
@@ -38,7 +43,7 @@ internal sealed class AccountsPage : CheckPage
 
     public AccountsPage(ICheckHost host) : base(host)
     {
-        bool hasClient = Batch.ClientEik.Length > 0;
+        bool hasClient = Batch.ClientEik.Length > 0 || Batch.ClientName.Length > 0;
 
         _grid.Use(Palette);
         _grid.SetHeights(26, 30);
@@ -59,19 +64,34 @@ internal sealed class AccountsPage : CheckPage
                 return null;
             },
         });
+        _grid.AddColumn(new()
+        {
+            Header = "✎ Валута", Width = 92, Center = true, Get = r => r.Currency,
+            Tip = "Само за сметка, която в Делта Pro е от тип „Валутна“ – нейната валута, например USD.\n" +
+                  "Документ в тази валута се записва с нея: евро (валута|курс|фиксинг). Празно – сумата е само в евро.",
+            Set = (r, v) =>
+            {
+                string currency = Currencies.Normalise(v);
+                if (currency == Currencies.Euro) currency = "";
+                if (currency.Length > 0 && !Currencies.IsCode(currency)) return $"„{v}“ не е код на валута, например USD.";
+                r.Currency = currency;
+                return null;
+            },
+        });
         _grid.StyleCell = (row, column, style) =>
         {
-            if (column != TargetColumn) return;
+            if (column is not (TargetColumn or CurrencyColumn)) return;
             style.Font = Theme.Bold;
-            style.BackColor = row.Changed ? Theme.WarningBack : Palette.Soft;
-            if (row.Target != row.Automatic) style.ForeColor = Theme.EditedInk;
+            bool changed = column == TargetColumn ? row.Target != row.Original : row.Currency != row.OriginalCurrency;
+            style.BackColor = changed ? Theme.WarningBack : Palette.Soft;
+            if (column == TargetColumn && row.Target != row.Automatic) style.ForeColor = Theme.EditedInk;
         };
         _grid.Edited += _ => RefreshButtons();
         _grid.SortRequested += () => _grid.SetRows(_rows);
 
         _onlyClient = new RadioButton
         {
-            Text = hasClient ? $"Само за {(Batch.ClientName.Length > 0 ? Batch.ClientName : Batch.ClientEik)}" : "Само за тази фирма (файлът няма ЕИК)",
+            Text = hasClient ? $"Само за {(Batch.ClientName.Length > 0 ? Batch.ClientName : Batch.ClientEik)}" : "Само за тази фирма (файлът не казва коя е)",
             AutoSize = true, Enabled = hasClient, Checked = hasClient, Margin = new Padding(3, 8, 12, 3), UseMnemonic = false,
         };
         _everybody = new RadioButton { Text = "За всички фирми", AutoSize = true, Checked = !hasClient, Margin = new Padding(3, 8, 3, 3) };
@@ -87,7 +107,8 @@ internal sealed class AccountsPage : CheckPage
 
         Controls.Add(Rows(1,
             Note("Сметката се записва, както е във файла: основната сметка, после „/“ и подсметката – 4111 и 1 стават 4111/1, 411/1 и 1 стават 411/1/1. " +
-                 "Когато в Делта Pro номерът е друг, напишете го в последната колона; запомня се и важи и за следващите файлове."),
+                 "Когато в Делта Pro номерът е друг, напишете го в „В Делта Pro“; запомня се и важи и за следващите файлове. " +
+                 "„Валута“ е само за валутните сметки в Делта Pro."),
             _grid, bar));
         EndLayout();
     }
@@ -96,10 +117,10 @@ internal sealed class AccountsPage : CheckPage
 
     private void Reload(bool keepTyped)
     {
-        var typed = keepTyped ? _rows.Where(r => r.Changed).ToDictionary(r => (r.Key, r.Role), r => r.Target) : [];
+        var typed = keepTyped ? _rows.Where(r => r.Changed).ToDictionary(r => (r.Key, r.Role), r => (r.Target, r.Currency)) : [];
         _rows = CollectRows();
         foreach (var row in _rows)
-            if (typed.TryGetValue((row.Key, row.Role), out string? target)) row.Target = target;
+            if (typed.TryGetValue((row.Key, row.Role), out var own)) (row.Target, row.Currency) = own;
 
         _grid.SetRows(_rows);
         RefreshButtons();
@@ -115,11 +136,12 @@ internal sealed class AccountsPage : CheckPage
 
         Row New(string account, string analytic, string name, string role, int documents)
         {
-            string target = AccountCodes.Format(account, analytic, options);
+            string target = AccountCodes.Format(account, analytic, options), currency = options.AccountCurrency(account, analytic);
             return new Row
             {
                 Account = account, Analytic = analytic, Name = name, Role = role, Documents = documents,
                 Automatic = AccountCodes.Format(account, analytic, automatic), Original = target, Target = target,
+                OriginalCurrency = currency, Currency = currency,
             };
         }
 
@@ -143,29 +165,34 @@ internal sealed class AccountsPage : CheckPage
     {
         _grid.EndEdit();
 
-        var settings = Host.App.Settings;
-        var client = _onlyClient.Checked ? settings.ClientFor(Batch.ClientEik, Batch.ClientName) : null;
-        foreach (var row in _rows.Where(r => r.Changed))
+        var general = Host.App.Settings.General;
+        var client = _onlyClient.Checked
+            ? Host.App.Clients.FindOrNew(Batch.ClientEik, Batch.ClientName)
+            : Host.App.Clients.Find(Batch.ClientEik, Batch.ClientName);   // what it has wins over the common
+
+        foreach (var row in _rows.Where(r => r.Changed).ToList())
         {
-            if (client != null)
+            // Without anything of its own, then with what still differs: „automatic" for a client may
+            // be something else than a common mapping.
+            client?.Accounts.Remove(row.Key);
+            client?.AccountCurrencies.Remove(row.Key);
+            if (!_onlyClient.Checked)
             {
-                // „Automatic" for the client may still differ from a common mapping.
-                client.Accounts.Remove(row.Key);
-                if (Resolve(row) != row.Target) client.Accounts[row.Key] = row.Target;
+                general.Accounts.Remove(row.Key);
+                general.AccountCurrencies.Remove(row.Key);
             }
-            else
-            {
-                settings.General.Accounts.Remove(row.Key);
-                if (settings.Clients.TryGetValue(Batch.ClientEik, out var own)) own.Accounts.Remove(row.Key);
-                if (Resolve(row) != row.Target) settings.General.Accounts[row.Key] = row.Target;
-            }
+
+            var options = new ConverterOptions(general, client);
+            if (AccountCodes.Format(row.Account, row.Analytic, options) != row.Target)
+                (_onlyClient.Checked ? client!.Accounts : general.Accounts)[row.Key] = row.Target;
+            if (options.AccountCurrency(row.Account, row.Analytic) != row.Currency)
+                (_onlyClient.Checked ? client!.AccountCurrencies : general.AccountCurrencies)[row.Key] = row.Currency.Length > 0 ? row.Currency : Currencies.Euro;
         }
 
-        if (Host.App.Save() is { } problem) Dialogs.Warning(FindForm(), "Настройките не можаха да бъдат записани", problem);
+        string? problem = Host.App.Save();
+        if (client != null) problem = Host.App.Save(client) ?? problem;
+        if (problem != null) Dialogs.Warning(FindForm(), "Настройките не можаха да бъдат записани", problem);
         _rows = [];   // what was typed is in force now
         Host.SettingsChanged();
     }
-
-    private string Resolve(Row row) =>
-        AccountCodes.Format(row.Account, row.Analytic, Host.App.Settings.OptionsFor(Batch.ClientEik));
 }

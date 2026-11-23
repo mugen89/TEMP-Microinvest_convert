@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MicroinvestConvert.Core\MicroinvestConvert.Core.csproj" />
+    <ProjectReference Include="..\MicroinvestConvert.Data\MicroinvestConvert.Data.csproj" />
   </ItemGroup>
 
   <ItemGroup>

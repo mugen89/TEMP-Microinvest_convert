@@ -299,12 +299,6 @@ public class AccountingDateTests
     [Fact]
     public void Without_a_period_the_date_is_the_document_date() =>
         Assert.Equal(new AccountingDate(new DateTime(2026, 7, 2), false), AccountingDates.Resolve(new DateTime(2026, 7, 2), null));
-
-    [Theory]
-    [InlineData(2025, 12, 31, "BGN")]
-    [InlineData(2026, 1, 1, "EUR")]
-    public void The_books_are_in_euro_since_2026(int y, int m, int d, string expected) =>
-        Assert.Equal(expected, BookCurrency.On(new DateTime(y, m, d)));
 }
 
 public class VatRatesTests

@@ -1,3 +1,4 @@
+using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
 using static MicroinvestConvert.Core.Rules.RuleText;
@@ -35,33 +36,23 @@ internal static class ForeignRules
                 $"Документът е в „Чуждестранни“, а номерът на доставчика е български ({(doc.VatNumber.Length > 0 ? doc.VatNumber : doc.Eik)}). " +
                 "Проверете номера и вида сделка."));
 
-        foreach (var line in doc.Lines.Where(l => l.InvoiceCurrency == BookCurrency.Euro && Math.Abs(l.Base - l.InvoiceTotal) > Cent))
+        foreach (var line in doc.Lines.Where(l => doc.CurrencyOf(l) == Currencies.Euro && Math.Abs(l.Base - l.SellerTotal) > Cent))
             doc.Issues.Add(new Issue(IssueCode.EuroTotalDiffers,
-                $"Ред {line.SourceRow}: фактурата е в евро за {Money(line.InvoiceTotal)}, а се записват {Money(line.Base)}."));
-
-        // Held back already: the amounts are still in the currency of the invoice.
-        if (doc.Currency != BookCurrency.Euro) return;
-
-        foreach (var group in doc.Lines.Where(IsConverted).GroupBy(l => l.InvoiceCurrency))
-        {
-            decimal total = group.Sum(l => l.InvoiceTotal), euro = group.Sum(l => l.Base);
-            doc.Issues.Add(new Issue(IssueCode.ConvertedToEuro,
-                $"{Money(total)} {group.Key} = {Money(euro)} EUR" +
-                (total != 0m && euro != 0m ? $" (1 EUR = {Rate(total / euro)} {group.Key})." : ".")));
-        }
+                $"Ред {line.SourceRow}: фактурата е в евро за {Money(line.SellerTotal)}, а се записват {Money(line.Base)}."));
     }
 
     /// <summary>
-    /// The exchange rates the amounts come to, against each other: on the rows of a document,
-    /// and over the documents of the file. A document total repeated on every row shows here.
+    /// The exchange rates the amounts in euro come to, against each other: on the rows of a
+    /// document, and over the documents of the file. A document total repeated on every row shows
+    /// here. Only where the official rate is not known – otherwise they are compared with it.
     /// </summary>
     public static void CheckRates(OperationBatch batch)
     {
-        var lines = batch.Documents.Where(d => d.Currency == BookCurrency.Euro)
-            .SelectMany(d => d.Lines.Where(IsConverted).Select(l => (Doc: d, Line: l, Rate: l.InvoiceTotal / l.Base)))
+        var lines = batch.Documents
+            .SelectMany(d => d.Lines.Where(l => IsCompared(d, l)).Select(l => (Doc: d, Line: l, Rate: l.Gross / l.Euro!.Value)))
             .ToList();
 
-        foreach (var currency in lines.GroupBy(x => x.Line.InvoiceCurrency))
+        foreach (var currency in lines.GroupBy(x => x.Doc.CurrencyOf(x.Line)))
         {
             // The documents of a file are a month or two apart; a median needs a few of them.
             var rates = currency.Select(x => x.Rate).OrderBy(r => r).ToList();
@@ -70,13 +61,11 @@ internal static class ForeignRules
 
             foreach (var x in currency.Where(x => Math.Abs(x.Rate / usual - 1m) > RateTolerance))
                 x.Doc.Issues.Add(new Issue(IssueCode.EuroRate,
-                    $"Ред {x.Line.SourceRow}: {Money(x.Line.InvoiceTotal)} {currency.Key} = {Money(x.Line.Base)} EUR прави курс {Rate(x.Rate)}, " +
+                    $"Ред {x.Line.SourceRow}: {Money(x.Line.Gross)} {currency.Key} = {Money(x.Line.Euro!.Value)} EUR прави курс {Rate(x.Rate)}, " +
                     $"а обичайният във файла е {Rate(usual)}. Проверете сумата в евро (кол. AI)."));
         }
     }
 
-    private static bool IsConverted(LedgerLine line) =>
-        line.InvoiceCurrency.Length > 0 && line.InvoiceCurrency != BookCurrency.Euro && line.InvoiceTotal != 0m && line.Base != 0m;
-
-    private static string Rate(decimal rate) => Money(Math.Round(rate, 4));
+    private static bool IsCompared(OperationDocument doc, LedgerLine line) =>
+        doc.ConversionOf(line) is { Origin: RateOrigin.File, Official: null } && line.Gross != 0m && line.Euro is { } euro && euro != 0m;
 }

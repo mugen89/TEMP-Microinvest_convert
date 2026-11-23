@@ -6,6 +6,7 @@ using MicroinvestConvert.App.Forms;
 using MicroinvestConvert.App.Forms.Checks;
 using MicroinvestConvert.App.Updates;
 using MicroinvestConvert.Core.Model;
+using MicroinvestConvert.Core.Settings;
 using MicroinvestConvert.Core.Source;
 
 namespace MicroinvestConvert.Tests;
@@ -14,6 +15,7 @@ namespace MicroinvestConvert.Tests;
 /// Draws the windows to PNG files, for a look at the layout. Runs only when asked:
 ///   MICONVERT_SHOTS  = folder for the pictures
 ///   MICONVERT_FILES  = export files, separated by „|"
+///   MICONVERT_DB     = a database of the program, for its exchange rates (a copy of it is used)
 ///   MICONVERT_SCALE  = 1.5 to see the layout as on a screen at 150% (the text stays small)
 /// </summary>
 public class VisualTests
@@ -50,7 +52,11 @@ public class VisualTests
     private static void Draw(string folder, string[] files)
     {
         string settings = Path.Combine(Path.GetTempPath(), "mic-shots-" + Guid.NewGuid(), "settings.json");
-        var app = new AppState(settings);
+        Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
+        if (Environment.GetEnvironmentVariable("MICONVERT_DB") is { Length: > 0 } database)
+            File.Copy(database, Path.Combine(Path.GetDirectoryName(settings)!, Data.Database.FileName));
+        using var app = new AppState(settings, rateSource: new FakeSource());
+        app.Rates.Auto = false;
         app.Settings.CheckForUpdates = false;
         foreach (string file in files) app.Settings.AddRecent(file);
         using var updates = new UpdateService(AppInfo.Version);
@@ -59,10 +65,10 @@ public class VisualTests
         {
             Show(main);
             Shot(main, Path.Combine(folder, "start.png"));
-            main.ClientSize = new Size(main.LogicalToDeviceUnits(960), main.LogicalToDeviceUnits(540));
+            main.Size = main.MinimumSize;
             Pump();
             Shot(main, Path.Combine(folder, "start-small.png"));
-            main.ClientSize = new Size(main.LogicalToDeviceUnits(1080), main.LogicalToDeviceUnits(640));
+            main.ClientSize = new Size(main.LogicalToDeviceUnits(1080), main.LogicalToDeviceUnits(690));
 
             foreach (var kind in OperationKinds.All)
             {
@@ -114,6 +120,22 @@ public class VisualTests
             }
         }
 
+        using (var form = new RatesForm(app, [new DateTime(2026, 6, 10), new DateTime(2026, 6, 12)]))
+        {
+            Show(form);
+            Shot(form, Path.Combine(folder, "rates.png"));
+            var currencies = All(form).OfType<ComboBox>().Single();
+            for (int i = 0; i < currencies.Items.Count; i++)
+                if (currencies.Items[i]!.ToString()!.StartsWith("USD", StringComparison.Ordinal)) currencies.SelectedIndex = i;
+            All(form).OfType<TextBox>().First().Text = "40.01.2026";
+            Pump();
+            Shot(form, Path.Combine(folder, "rates-usd.png"));
+        }
+
+        app.Clients.Save(new ClientSettings { Name = "Тестова Фирма ЕООД", Eik = "123456786", VatNumber = "BG123456786", CashAccount = "501/1", Accounts = { ["401"] = "401/1" }, AccountCurrencies = { ["4012"] = "USD" } });
+        app.Clients.Save(new ClientSettings { Name = "Фирма само с име", Note = "без ЕИК" });
+        using (var form = new ClientsForm(app, files.Take(2).Select(AiReader.Read).ToList())) ShowAndShot(form, Path.Combine(folder, "clients.png"));
+
         using (var form = new DealTypesForm()) ShowAndShot(form, Path.Combine(folder, "deal-types.png"));
         using (var form = new UpdateForm(app, updates))
         {
@@ -160,6 +182,8 @@ public class VisualTests
             Thread.Sleep(15);
         }
     }
+
+    private static IEnumerable<Control> All(Control parent) => parent.Controls.Cast<Control>().SelectMany(c => All(c).Prepend(c));
 
     private static T Find<T>(Control parent) where T : Control
     {
