@@ -216,17 +216,39 @@ public class AccountCodesTests
     [Theory]
     [InlineData("601", "5", "601/5")]
     [InlineData("401", "", "401")]
-    [InlineData("4111", "", "411/1")]
-    [InlineData("7012", "81", "701/2/81")]
+    [InlineData("4111", "", "4111")]          // the digits are never split
+    [InlineData("4111", "1", "4111/1")]
+    [InlineData("411/1", "", "411/1")]
+    [InlineData("411/1", "1", "411/1/1")]     // the sub-account is always added, even when it repeats
+    [InlineData("7012", "81", "7012/81")]
     [InlineData("453/1", "", "453/1")]
-    [InlineData("401/1", "5", "401/1/5")]
+    [InlineData("401/1", "5/2", "401/1/5/2")]
     [InlineData("", "5", "")]
     public void Main_account_then_sub_accounts_after_a_slash(string account, string analytic, string expected) =>
         Assert.Equal(expected, Format(account, analytic));
 
-    [Fact]
-    public void Splitting_can_be_switched_off() =>
-        Assert.Equal("7012/81", Format("7012", "81", s => s.SplitLongAccounts = false));
+    [Theory]
+    [InlineData("411/", "1", "411/1")]
+    [InlineData("411/1/", "", "411/1")]
+    [InlineData("/411/1", "/1/", "411/1/1")]
+    [InlineData("411 / 1", " 1 ", "411/1/1")]
+    [InlineData("411//1", "", "411/1")]
+    [InlineData("411/1", "-", "411/1")]
+    [InlineData("-", "1", "")]
+    [InlineData("/", "1", "")]
+    public void The_slashes_people_type_are_cleaned(string account, string analytic, string expected) =>
+        Assert.Equal(expected, Format(account, analytic));
+
+    [Theory]
+    [InlineData("411 1")]      // 4111 or 411/1?
+    [InlineData("411.1")]
+    [InlineData("411-1")]
+    [InlineData("411\\1")]
+    public void What_could_mean_two_things_is_reported_and_not_guessed(string account)
+    {
+        Assert.Equal(account, Format(account, ""));
+        Assert.NotNull(AccountCodes.Problem(Format(account, "")));
+    }
 
     [Fact]
     public void A_mapping_of_the_whole_account_wins() =>

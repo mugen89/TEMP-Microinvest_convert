@@ -2,6 +2,7 @@ using MicroinvestConvert.App.Ui;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Rules;
 using MicroinvestConvert.Core.Settings;
+using MicroinvestConvert.Core.Values;
 
 namespace MicroinvestConvert.App.Forms;
 
@@ -21,7 +22,7 @@ internal sealed class AccountsForm : AppForm
         public required string Original { get; init; }
         public string Target { get; set; } = "";
 
-        public string Key => Analytic.Length == 0 ? Account : Account + "/" + Analytic;
+        public string Key => AccountText.Join(Account, Analytic);
         public bool Changed => Target != Original;
     }
 
@@ -45,7 +46,7 @@ internal sealed class AccountsForm : AppForm
 
         _grid.Use(palette);
         _grid.SetHeights(26, 30);
-        _grid.AddColumn(new() { Header = "Във файла", Width = 110, Get = r => r.Key });
+        _grid.AddColumn(new() { Header = "Във файла", Width = 110, Get = r => r.Key, Tip = "Основна сметка / подсметка" });
         _grid.AddColumn(new() { Header = "Име", Width = 220, Fill = true, Get = r => r.Name });
         _grid.AddColumn(new() { Header = "Роля", Width = 130, Get = r => r.Role });
         _grid.AddColumn(new() { Header = "Документи", Width = 108, Right = true, Get = r => r.Documents.ToString(), SortKey = r => r.Documents });
@@ -54,7 +55,7 @@ internal sealed class AccountsForm : AppForm
             Header = "В Делта Pro", Width = 150, Get = r => r.Target, Tip = "Променете, ако сметката в Делта Pro е друга. Изтрийте, за да се върне автоматичната.",
             Set = (r, v) =>
             {
-                string target = v.Trim().Replace(" ", "");
+                string target = AccountText.Normalise(v);
                 if (target.Length == 0) target = r.Automatic;
                 if (target.Length > 0 && AccountCodes.Problem(target) is { } problem) return $"„{target}“ – {problem}.";
                 r.Target = target;
@@ -78,8 +79,8 @@ internal sealed class AccountsForm : AppForm
         _everybody = new RadioButton { Text = "За всички фирми", AutoSize = true, Checked = !hasClient, Margin = new Padding(3, 6, 3, 3) };
 
         var note = Make.Text(
-            "Сметката се записва като основна сметка, после „/“ и подсметките – например 401/1/5. " +
-            "Когато в Делта Pro номерът е друг, напишете го в последната колона; запомня се и важи и за следващите файлове.", Theme.Muted, 800);
+            "Сметката се записва, както е във файла: основната сметка, после „/“ и подсметката – 4111 и 1 стават 4111/1, 411/1 и 1 стават 411/1/1. " +
+            "Когато в Делта Pro номерът е друг, напишете го в последната колона; запомня се и важи и за следващите файлове.", Theme.Muted, 820);
         note.Margin = new Padding(12, 8, 12, 4);
 
         var save = new FlatButton("Запомни", ButtonLook.Primary);
@@ -112,7 +113,7 @@ internal sealed class AccountsForm : AppForm
     {
         bool purchase = _batch.Kind == OperationKind.Purchase;
         var options = _app.Settings.OptionsFor(_batch.ClientEik);
-        var automatic = new ConverterOptions(new ConverterSettings { SplitLongAccounts = _app.Settings.General.SplitLongAccounts });
+        var automatic = ConverterOptions.Default;
 
         Row New(string account, string analytic, string name, string role, int documents)
         {

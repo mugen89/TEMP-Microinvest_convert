@@ -162,13 +162,15 @@ internal static class PurchaseRules
                 "Обратно начисляване по чл. 163а – изисква протокол (колони Q–AA), който ще бъде добавен в следваща версия. " +
                 "Документът не се записва, освен ако не зададете вид сделка на редовете му."));
 
+        bool foreign = new PartnerIdentity(doc.Eik, doc.VatNumber).IsForeign;
+
         if (doc.Lines.Any(l => l.Bucket == LedgerBucket.PurchaseNoDiary))
             doc.Issues.Add(new Issue(IssueSeverity.Info, IssueCode.NoDiary, options.General.NoDiary switch
             {
                 NoDiaryMode.Skip => "„Без ДДС дневник“ – не се записва (настройка).",
                 NoDiaryMode.NoCredit => "„Без ДДС дневник“ – вид сделка 3 (настройка).",
                 _ => "„Без ДДС дневник“ – вид сделка 1, не влиза в дневника.",
-            }));
+            } + (foreign ? $" Доставчикът е чужд ({doc.VatNumber}): протоколът за самоначисляване на ДДС (кол. Q–AA) не се създава в тази версия." : "")));
 
         if (doc.Lines.Any(l => l.Bucket == LedgerBucket.PurchaseUnspecified))
             doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.Unspecified,
@@ -181,7 +183,6 @@ internal static class PurchaseRules
             AddVatIssue(doc, group);
         }
 
-        bool foreign = new PartnerIdentity(doc.Eik, doc.VatNumber).IsForeign;
         if (foreign && doc.Lines.Any(l => l.Bucket != LedgerBucket.PurchaseNoDiary && l.DealTypeOverride == null))
             doc.Issues.Add(new Issue(IssueSeverity.Warning, IssueCode.ForeignSupplier,
                 $"Доставчикът е чужд ({doc.VatNumber}). Обикновено такава доставка е с протокол – вид сделка 1 и колони Q–AA " +

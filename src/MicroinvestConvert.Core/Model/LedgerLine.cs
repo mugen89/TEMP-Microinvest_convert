@@ -25,9 +25,14 @@ public sealed class LedgerLine
     public int SourceRow { get; init; }
     public LedgerBucket Bucket { get; init; }
 
-    public string Account { get; set; } = "";
+    private string _account = "", _analytic = "";
+
+    /// <summary>The main account („Код на счетоводна сметка"), with its „/" cleaned.</summary>
+    public string Account { get => _account; set => _account = AccountText.Normalise(value); }
     public string AccountName { get; init; } = "";
-    public string Analytic { get; set; } = "";
+
+    /// <summary>The sub-account („Код на крайна аналитичност").</summary>
+    public string Analytic { get => _analytic; set => _analytic = AccountText.Normalise(value); }
     public string AnalyticName { get; init; } = "";
     public string Article { get; init; } = "";
 
@@ -68,8 +73,8 @@ public sealed class LedgerLine
     public int DealType => DealTypeOverride ?? AutoDealType;
     public decimal Gross => Base + Vat;
 
-    /// <summary>The account with its analytic, as in the file: 601/5.</summary>
-    public string AccountKey => Analytic.Length == 0 ? Account : Account + "/" + Analytic;
+    /// <summary>The account with its sub-account, as in the file: 601/5.</summary>
+    public string AccountKey => AccountText.Join(Account, Analytic);
 
     // ----- editing -----
 

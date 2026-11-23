@@ -157,6 +157,19 @@ public class PurchaseRuleTests
     }
 
     [Fact]
+    public void A_purchase_from_abroad_outside_the_ledger_says_that_the_protocol_is_missing()
+    {
+        string Note(string id) => Sheet.Purchase(1d, "1", 100, 0, [.. NoLedger, ("AG", "ДА"), ("J", id)]).Single()
+            .Issues.Single(i => i.Code == IssueCode.NoDiary).Message;
+
+        Assert.Contains("протоколът за самоначисляване", Note("DE123456789"));
+        Assert.DoesNotContain("протокол", Note(SupplierVat));
+
+        var doc = Sheet.Purchase(1d, "1", 100, 0, [.. NoLedger, ("AG", "ДА"), ("J", "DE123456789")]).Single();
+        Assert.Equal(("1", true, false), (doc.Deals(), doc.WillExport, doc.HasWarnings));   // as before: 1, and no warning
+    }
+
+    [Fact]
     public void A_foreign_supplier_in_the_ledger_is_pointed_out()
     {
         Assert.True(Sheet.Purchase(1d, "1", 443, 0, ("W", "0%"), ("J", "DK12345678")).Single().Has(IssueCode.ForeignSupplier));
@@ -344,6 +357,40 @@ public class DocumentRuleTests
             .Purchase(1d, "1", 15, 3, ("K", "602"), ("M", "1"))
             .Single();
         Assert.Equal(("100;25;25", "601/5;602/1;453/1"), (doc.Amounts(), doc.Accounts()));
+    }
+
+    [Fact]
+    public void The_accounts_of_the_file_are_written_as_they_are()
+    {
+        Assert.Equal("4111/1;453/1", Purchases.Purchase(1d, "1", 100, 20, ("K", "4111"), ("M", "1")).Single().Accounts());
+        Assert.Equal("411/1/1;453/1", Purchases.Purchase(1d, "1", 100, 20, ("K", "411/1"), ("M", "1")).Single().Accounts());
+        Assert.Equal("4111;453/1", Purchases.Purchase(1d, "1", 100, 20, ("K", "4111"), ("M", "-")).Single().Accounts());
+        Assert.Equal("4111;453/1", Purchases.Purchase(1d, "1", 100, 20, ("K", 4111d), ("M", null)).Single().Accounts());
+        Assert.Equal("4011", Purchases.Purchase(1d, "1", 100, 20, ("AI", "4011")).Single().CounterAccountOut);
+        Assert.Equal("401/1", Purchases.Purchase(1d, "1", 100, 20, ("AI", "401 / 1/")).Single().CounterAccountOut);
+        Assert.Equal("5011", Purchases.Purchase(1d, "1", 100, 20, ("AH", "В брой"), ("AJ", "5011")).Single().CashAccountOut);
+    }
+
+    [Fact]
+    public void The_same_account_typed_in_two_ways_is_one_amount()
+    {
+        var doc = Purchases
+            .Purchase(1d, "1", 100, 20, ("K", "601"), ("M", "5"))
+            .Purchase(1d, "1", 50, 10, ("K", "601/5/"), ("M", "-"))
+            .Single();
+        Assert.Equal(("150;30", "601/5;453/1"), (doc.Amounts(), doc.Accounts()));
+    }
+
+    [Fact]
+    public void An_account_with_two_possible_meanings_stops_the_document()
+    {
+        var doc = Purchases.Purchase(1d, "1", 100, 20, ("K", "411 1"), ("M", "-")).Single();
+        Assert.True(doc.Has(IssueCode.BadAccount));
+        Assert.False(doc.WillExport);
+
+        doc.Lines[0].TrySet(LineField.Account, "411/1", out _);
+        new DocumentProcessor(ConverterOptions.Default).Process(new TestSheet(Layout.Purchases).Purchase(1d, "1", 1, 0).Read(), doc);
+        Assert.True(doc.WillExport);
     }
 
     [Fact]

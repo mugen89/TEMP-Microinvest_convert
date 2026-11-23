@@ -49,7 +49,7 @@ public class OperationRowsTests
     {
         var row = Assert.Single(Rows(new TestSheet(Layout.Sales).Sale(1d, "0000000001", 375, 75, ("AB", 375d), ("AC", 75d), ("AM", "4111"))));
         Assert.Equal("375;75", Cell(row, "A"));
-        Assert.Equal("411/1-703;453/2", Cell(row, "B"));
+        Assert.Equal("4111-703;453/2", Cell(row, "B"));
         Assert.Equal("7;7", Cell(row, "N"));
         Assert.Equal("1", Cell(row, "O"));
         Assert.Equal("Продажба на услуги", Cell(row, "K"));
@@ -277,6 +277,18 @@ public class SettingsTests
         Assert.Equal("453/1", store.Load().General.PurchaseVatAccount);
         Assert.NotEqual("", store.LoadProblem);
         Assert.True(File.Exists(path + ".bad"));
+        Directory.Delete(Path.GetDirectoryName(path)!, true);
+    }
+
+    [Fact]
+    public void A_setting_that_no_longer_exists_is_ignored()
+    {
+        string path = TempFile();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{\"general\":{\"splitLongAccounts\":true,\"cashRows\":false}}");
+        var store = new SettingsStore(path);
+        Assert.False(store.Load().General.CashRows);
+        Assert.Equal("", store.LoadProblem);
         Directory.Delete(Path.GetDirectoryName(path)!, true);
     }
 

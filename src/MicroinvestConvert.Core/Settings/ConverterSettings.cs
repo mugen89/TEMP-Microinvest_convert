@@ -57,9 +57,6 @@ public sealed class ConverterSettings
     public string PurchaseVatAccount { get; set; } = DefaultPurchaseVatAccount;
     public string SaleVatAccount { get; set; } = DefaultSaleVatAccount;
 
-    /// <summary>4111 → 411/1: what follows the third digit becomes a sub-account.</summary>
-    public bool SplitLongAccounts { get; set; } = true;
-
     public VatRounding Rounding { get; set; } = VatRounding.HalfUp;
 
     /// <summary>Allowed difference between the VAT in the file and the calculated one, for a whole document.</summary>

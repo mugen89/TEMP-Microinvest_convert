@@ -58,9 +58,11 @@ public sealed class OperationDocument
     public string Currency { get; set; } = "";
     public PaymentMethod Payment { get; set; }
 
+    private string _counterAccount = "", _cashAccount = "";
+
     /// <summary>401 / 411 as in the file.</summary>
-    public string CounterAccount { get; set; } = "";
-    public string CashAccount { get; set; } = "";
+    public string CounterAccount { get => _counterAccount; set => _counterAccount = AccountText.Normalise(value); }
+    public string CashAccount { get => _cashAccount; set => _cashAccount = AccountText.Normalise(value); }
     public string Reason { get; set; } = "";
     public string CashReason { get; set; } = "";
     public string Note { get; set; } = "";

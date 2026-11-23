@@ -27,6 +27,13 @@ unchanged.
 - **Columns of the source are matched by position, never by header text** — the
   headers drift in the right part of the sales export. Two sales layouts exist
   (47 columns; 44 until July 2026); `AiFile` recognises them.
+- **Accounts are written as the file has them:** main account, „/", sub-account
+  (4111 and 1 → 4111/1; 411/1 and 1 → 411/1/1). Digits are never split — the
+  owner's decision. `AccountText` cleans only slashes and spaces that cannot mean
+  anything else; whatever could mean two things is an error, not a guess.
+- **Purchases „без ДДС дневник" → deal type 1 is unconfirmed** (П4, В5, В20). The
+  owner keeps it for now; most of them are purchases from abroad whose VAT comes
+  with a protocol, which this version does not write.
 - One debit – many credits (sales) or many debits – one credit (purchases);
   never many to many. The `%` shorthand of `Model.xls` is not used.
 - **Deal type 4 is legally „частичен данъчен кредит".** The owner's rule also

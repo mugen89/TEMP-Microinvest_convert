@@ -2,6 +2,7 @@ using MicroinvestConvert.App.Ui;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Rules;
 using MicroinvestConvert.Core.Settings;
+using MicroinvestConvert.Core.Values;
 
 namespace MicroinvestConvert.App.Forms;
 
@@ -16,7 +17,6 @@ internal sealed class SettingsForm : AppForm
     private readonly TextBox _clientPurchaseVat = Make.TextBox(120);
     private readonly TextBox _clientSaleVat = Make.TextBox(120);
 
-    private readonly CheckBox _split;
     private readonly TextBox _cashAccount = Make.TextBox(120, "няма");
     private readonly CheckBox _cashRows;
     private readonly ComboBox _noDiary = Make.Combo(330,
@@ -48,7 +48,6 @@ internal sealed class SettingsForm : AppForm
         Text = "Настройки";
         AsDialog(720, 450, 640, 420, maximize: false);
 
-        _split = Make.Check("Сметка с повече от 3 цифри се разделя: 4111 → 411/1", general.SplitLongAccounts);
         _cashRows = Make.Check("Документ, платен в брой, получава втори ред (РКО при покупка, ПКО при продажба)", general.CashRows);
         _updates = Make.Check("При стартиране проверявай за нова версия", app.Settings.CheckForUpdates);
         _purchaseVat.Text = general.PurchaseVatAccount;
@@ -170,24 +169,23 @@ internal sealed class SettingsForm : AppForm
             _mappings.SetRows(_mappingRows);
         };
 
-        var page = new TableLayoutPanel { ColumnCount = 1, RowCount = 4, Dock = DockStyle.Fill, AutoSize = false };
+        var page = new TableLayoutPanel { ColumnCount = 1, RowCount = 3, Dock = DockStyle.Fill, AutoSize = false };
         page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        page.Controls.Add(_split, 0, 0);
-        page.Controls.Add(Make.Text("Запомнени съответствия (добавят се от бутона „Сметки…“ в отворен файл):", Theme.Muted, 620), 0, 1);
-        page.Controls.Add(_mappings, 0, 2);
-        page.Controls.Add(remove, 0, 3);
+        page.Controls.Add(Make.Text("Сметките се записват, както са във файла. Тук са запомнените съответствия за тези, " +
+                                    "които в Делта Pro са с друг номер (добавят се от бутона „Сметки…“ в отворен файл).", Theme.Muted, 620), 0, 0);
+        page.Controls.Add(_mappings, 0, 1);
+        page.Controls.Add(remove, 0, 2);
         return page;
     }
 
     private void Accept()
     {
-        string purchase = _purchaseVat.Text.Trim(), sale = _saleVat.Text.Trim();
-        string clientPurchase = _clientPurchaseVat.Text.Trim(), clientSale = _clientSaleVat.Text.Trim();
-        string cash = _cashAccount.Text.Trim();
+        string purchase = AccountText.Normalise(_purchaseVat.Text), sale = AccountText.Normalise(_saleVat.Text);
+        string clientPurchase = AccountText.Normalise(_clientPurchaseVat.Text), clientSale = AccountText.Normalise(_clientSaleVat.Text);
+        string cash = AccountText.Normalise(_cashAccount.Text);
 
         foreach (var (name, value, required) in new[]
                  {
@@ -205,7 +203,6 @@ internal sealed class SettingsForm : AppForm
         var general = _app.Settings.General;
         general.PurchaseVatAccount = purchase;
         general.SaleVatAccount = sale;
-        general.SplitLongAccounts = _split.Checked;
         general.CashRows = _cashRows.Checked;
         general.DefaultCashAccount = cash;
         general.NoDiary = (NoDiaryMode)_noDiary.SelectedIndex;

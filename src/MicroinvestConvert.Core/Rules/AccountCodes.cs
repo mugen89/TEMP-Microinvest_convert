@@ -1,40 +1,28 @@
 using MicroinvestConvert.Core.Settings;
+using MicroinvestConvert.Core.Values;
 
 namespace MicroinvestConvert.Core.Rules;
 
 /// <summary>
-/// Accounts as Делта Pro writes them: the synthetic account, then every sub-account
-/// after a „/" — 401/1/5.
+/// Accounts as Делта Pro writes them: the main account, then every sub-account after a „/".
+/// The main account is the one of the file, whatever its length: 4111 stays 4111.
 /// </summary>
 public static class AccountCodes
 {
-    /// <summary>Digits of a synthetic account in the national chart of accounts.</summary>
-    private const int SyntheticDigits = 3;
-
     /// <summary>Делта Pro allows five levels under the synthetic account.</summary>
     private const int MaxLevels = 6;
 
     /// <summary>
     /// The account of the file as it goes into column B. A mapping chosen by the user wins
-    /// (first for the account with its analytic, then for the account alone).
+    /// (first for the account with its sub-account, then for the account alone).
     /// </summary>
-    public static string Format(string account, string analytic, ConverterOptions options)
+    public static string Format(string account, string subAccount, ConverterOptions options)
     {
-        account = account.Trim();
-        analytic = analytic.Trim();
-        if (account.Length == 0) return "";
+        string main = AccountText.Normalise(account), sub = AccountText.Normalise(subAccount);
+        if (main.Length == 0) return "";
 
-        if (analytic.Length > 0 && options.MappedAccount(account + "/" + analytic) is { } whole) return whole;
-
-        string main = options.MappedAccount(account) ?? Split(account, options);
-        return analytic.Length == 0 ? main : main + "/" + analytic;
-    }
-
-    private static string Split(string account, ConverterOptions options)
-    {
-        if (!options.General.SplitLongAccounts) return account;
-        if (account.Length <= SyntheticDigits || !account.All(char.IsAsciiDigit)) return account;
-        return account[..SyntheticDigits] + "/" + account[SyntheticDigits..];
+        if (sub.Length > 0 && options.MappedAccount(AccountText.Join(main, sub)) is { } whole) return whole;
+        return AccountText.Join(options.MappedAccount(main) ?? main, sub);
     }
 
     /// <summary>Why the account cannot be written in column B; null when it can.</summary>
