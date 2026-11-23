@@ -142,7 +142,7 @@ public static partial class AiReader
         return new PartnerIdentity(id.Eik.Length > 0 ? id.Eik : vat.Eik, vat.VatNumber.Length > 0 ? vat.VatNumber : id.VatNumber);
     }
 
-    // Excel drops the leading zeros of a number typed as a number: 9679 was 0000009679.
+    // Excel drops the leading zeros of a number typed as a number: 1234 was 0000001234.
     private static string ReadNumber(object? cell, OperationDocument doc)
     {
         string number = CellValues.Norm(cell);

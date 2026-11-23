@@ -140,15 +140,15 @@ public class AiReaderTests
     [Fact]
     public void A_number_stored_as_a_number_gets_its_zeros_back()
     {
-        var sheet = new TestSheet(Layout.Purchases).Purchase(1d, "x", 100, 20, ("D", 9679d));
+        var sheet = new TestSheet(Layout.Purchases).Purchase(1d, "x", 100, 20, ("D", 1234d));
         var doc = sheet.Read().Documents[0];
-        Assert.Equal("0000009679", doc.Number);
+        Assert.Equal("0000001234", doc.Number);
         Assert.Contains(doc.ReadIssues, i => i.Code == IssueCode.PaddedNumber);
     }
 
     [Fact]
     public void Text_numbers_are_never_touched() =>
-        Assert.Equal("9679", new TestSheet(Layout.Purchases).Purchase(1d, "9679", 100, 20).Read().Documents[0].Number);
+        Assert.Equal("1234", new TestSheet(Layout.Purchases).Purchase(1d, "1234", 100, 20).Read().Documents[0].Number);
 
     [Fact]
     public void The_operation_of_the_largest_account_names_the_document()

@@ -16,3 +16,7 @@ TestResults/
 *.xlsm
 *.csv
 samples/
+
+# The owner's words, the real samples and what was found in them, the scripts that
+# check them: docs/PROJECT_LOG.md says what is there. Never public.
+private/

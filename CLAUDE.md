@@ -11,6 +11,12 @@ conversion is approved the engine moves into the owner's web edition. Keep
 `MicroinvestConvert.Core` free of UI and Windows code so it can be copied there
 unchanged.
 
+**Read [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) first:** where things stand, how
+the program works, every decision and who made it, how it was checked, what is
+open. Add an entry to its §5 at the end of every session – and move §1, §6 and §7
+on with it. What may not be public (the owner's words, sample files and what was
+found in them, the scripts that check them) goes to `private/`, which git ignores.
+
 ## Rules that bite
 
 - **The repository is PUBLIC.** Never commit client workbooks, names, ЕИК, VAT

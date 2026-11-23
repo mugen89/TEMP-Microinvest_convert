@@ -64,7 +64,7 @@ public class ForeignTests
     [Fact]
     public void A_credit_note_has_a_minus()
     {
-        Assert.Equal("-231.47", Cells(Sheet.Invoice(1d, "CN-1", -231.47m, "EUR", -231.47m, ("B", "КИ"), ("C", 3d)))[0]);
+        Assert.Equal("-61.35", Cells(Sheet.Invoice(1d, "CN-1", -61.35m, "EUR", -61.35m, ("B", "КИ"), ("C", 3d)))[0]);
         var positive = Sheet.Invoice(1d, "CN-1", 50, "EUR", 50, ("B", "КИ"), ("C", 3d)).Single();
         Assert.Equal((-50m, true), (positive.TotalGross, positive.Has(IssueCode.SignFlipped)));
     }

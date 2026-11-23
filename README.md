@@ -35,6 +35,7 @@
 | [docs/Output_Format.md](docs/Output_Format.md) | Файлът за Делта Pro, колона по колона |
 | [docs/Later.md](docs/Later.md) | Какво е отложено: валута, протоколи, вътрешен оборот |
 | [CHANGELOG.md](CHANGELOG.md) | Какво е ново във всяка версия |
+| [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md) | Дневник на проекта (на английски): какво прави програмата, какво е решено и от кого, как е проверена, какво остава |
 
 ## Обновяване
 

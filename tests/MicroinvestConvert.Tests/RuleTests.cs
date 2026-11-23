@@ -462,9 +462,9 @@ public class DocumentRuleTests
         var doc = Sales
             .Sale(1d, "1", 560.953m, 0, ("K", "701"), ("M", "1"), ("AG", 560.953d))
             .Sale(1d, "1", 297.787m, 0, ("K", "701"), ("M", "2"), ("AG", 297.787d))
-            .Sale(1d, "1", 941.832m, 0, ("K", "701"), ("M", "3"), ("AG", 941.832d))
+            .Sale(1d, "1", 914.832m, 0, ("K", "701"), ("M", "3"), ("AG", 914.832d))
             .Single();
-        Assert.Equal(1800.57m, doc.TotalGross);       // 1800.572
+        Assert.Equal(1773.57m, doc.TotalGross);       // 1773.572
         Assert.Equal(doc.TotalGross, doc.Segments.Sum(s => s.Amount));
     }
 
