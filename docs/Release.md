@@ -17,6 +17,20 @@ GitHub Actions (`.github/workflows/release.yml`) проверява, че мар
 
 GitHub сам публикува контролната сума (SHA-256) на всеки файл; програмата не инсталира файл, който не съвпада с нея.
 
+## Репетиция на обновяването
+
+Преди версия, която променя самото обновяване – с две истински програми (отварят се прозорци):
+
+```
+dotnet publish src/MicroinvestConvert.App -p:PublishProfile=win-x64 -p:PublishDir=<папка1>\
+dotnet publish src/MicroinvestConvert.App -p:PublishProfile=win-x64 -p:Version=9.9.9 -p:PublishDir=<папка2>\
+$env:MICONVERT_OLD_EXE = "<папка1>\MicroinvestConvert.exe"
+$env:MICONVERT_NEW_EXE = "<папка2>\MicroinvestConvert.exe"
+dotnet test --filter UpdateRehearsal
+```
+
+Тестът пуска старата, подменя я, докато работи, пуска новата, проверява, че старата е запазена, и се връща към нея.
+
 ## Ако нещо се обърка
 
 - Версия, публикувана по грешка: изтрийте я от страницата Releases – програмите ще виждат предишната като последна.

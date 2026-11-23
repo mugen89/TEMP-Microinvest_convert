@@ -63,10 +63,13 @@ dotnet publish src/MicroinvestConvert.App -p:PublishProfile=win-x64
 
 Pictures of every window (no client data leaves the machine):
 set `MICONVERT_SHOTS=<folder>` and `MICONVERT_FILES=<file>|<file>`, then
-`dotnet test --filter VisualTests`.
+`dotnet test --filter VisualTests`. A rehearsal of the update with two real
+programs: `docs/Release.md`.
 
 Real samples are outside this repository (the parent folder's CLAUDE.md says
 where). Before and after an engine change run the CLI with `--rows` over them
 and compare.
 
-Releases: `docs/Release.md` (tag `v<Version>` → GitHub Actions).
+Releases: `docs/Release.md` (tag `v<Version>` → GitHub Actions). A release is
+public and reaches every installed program, so the owner decides when: prepare
+everything, then let them push the tag.
