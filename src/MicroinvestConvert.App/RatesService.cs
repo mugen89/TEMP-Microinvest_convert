@@ -217,8 +217,13 @@ internal sealed class RatesService : IDisposable
             }
             finally
             {
-                _running = null;
-                if (!_closing.IsCancellationRequested) Finish(result);
+                if (!_closing.IsCancellationRequested) Remember(result);
+                _running = null;   // it is over when the database is let go
+                if (!_closing.IsCancellationRequested)
+                {
+                    Changed?.Invoke();
+                    if (result is not { Added: 0 }) Arrived?.Invoke();
+                }
             }
         }
 
@@ -227,7 +232,7 @@ internal sealed class RatesService : IDisposable
     }
 
     /// <param name="result">Null when the database failed: what was kept before that is there all the same.</param>
-    private void Finish(RateUpdate? result)
+    private void Remember(RateUpdate? result)
     {
         LastResult = DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture) + " – " +
                      (result == null ? "курсовете не могат да бъдат записани" : Text(result));
@@ -239,9 +244,6 @@ internal sealed class RatesService : IDisposable
         {
             // Only a note. The rates themselves are kept.
         }
-
-        Changed?.Invoke();
-        if (result is not { Added: 0 }) Arrived?.Invoke();
     }
 
     /// <summary>What a download brought, in a few words.</summary>

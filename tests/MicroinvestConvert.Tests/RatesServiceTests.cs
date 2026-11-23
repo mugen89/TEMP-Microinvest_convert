@@ -216,6 +216,26 @@ public sealed class RatesServiceTests : IDisposable
         Assert.EndsWith("нови дни", rates.LastResult);
     }
 
+    [Fact]
+    public async Task It_is_over_when_its_note_is_kept()
+    {
+        using var rates = Service();
+        rates.From = LongAgo;
+        _source.Fails = _ => FakeSource.NoInternet;
+        Task update;
+        using (Locked())   // nothing to keep but the note, and it has to wait
+        {
+            update = rates.UpdateQuietlyAsync();
+            await Until(() => _source.Asked.Count == 1);
+            await Task.Delay(300);
+            Assert.True(rates.IsRunning);
+        }
+
+        await update;
+        Assert.False(rates.IsRunning);
+        Assert.Equal(rates.LastResult, new SettingStore(Database.Open(DatabasePath)).Get("rates.last"));
+    }
+
     // ----- what documents need -----
 
     [Fact]

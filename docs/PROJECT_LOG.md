@@ -23,7 +23,7 @@ What is going on in this project: what the program does, what was decided and by
 | **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`) and **1.1.1** (tag `v1.1.1`, commit `b41f29c`). 1.0.0 was only ever a program on the owner's computer |
 | **Made, not released** | **1.2.0** – currency, exchange rates, a database, clients. Committed, without a tag; a test build is on the owner's computer (`publish/1.2.0`, starting date 01.01.2026) |
 | **Modules** | Покупки, Продажби, Чуждестранни – exports of AI Accounting → `.xls` for Делта Pro, everything in euro |
-| **Tests** | 599, green on the computer |
+| **Tests** | 600, green on the computer |
 | **With the accountant** | `Deal_Type.md`: 71 rows with a box to tick, 27 questions. Nothing has come back yet; В5, В17, В20, В23 and В27 carry the owner's decision |
 | **Never done yet** | **importing a written file into Делта Pro** |
 | **Update in the program** | seen working on the owner's computer: their copy of 1.1.0 is 1.1.1 since 16:12 on 2026-11-23, with 1.1.0 kept |
@@ -43,7 +43,7 @@ It is a spin-off. The mapping to Делта Pro comes from the owner, who is not
 | `src/MicroinvestConvert.Data` | the database | 4 files, 450 lines |
 | `src/MicroinvestConvert.App` | the windows and the update | 31 files, 6 400 lines |
 | `tools/MicroinvestConvert.Cli` | `miconvert <file> --rows --issues` for comparing two versions; `miconvert rates` | 1 file |
-| `tests/MicroinvestConvert.Tests` | 599 tests, all with invented data | 19 files, 6 500 lines |
+| `tests/MicroinvestConvert.Tests` | 600 tests, all with invented data | 19 files, 6 500 lines |
 
 .NET 9, WinForms, xUnit; ExcelDataReader reads, NPOI writes the old `.xls`, SQLite (Microsoft.Data.Sqlite) keeps the rates and the clients.
 
@@ -275,6 +275,7 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
   - A file opened together with the program took the place of the update from the starting date → what comes during a download waits for its turn.
   - A database that was only busy at the start was passed over for a new, empty one in the other place → the program says so and works without one until the next start.
   - What had been kept before a write failed, and rates whose note of the download could not be kept, were not used by the open files.
+  - The first build on GitHub (`3893556`) was red: a download counted as over a moment before its note was kept, so on a slower machine a test took the database away meanwhile → it is over when the note is kept. In the program both happen on the window thread, so nothing could come between them there.
 - **Verified:** §6.
 - **Committed** with the owner's permission, **not released**: there is no tag. The version is 1.2.0 and everything for a release is ready.
 
@@ -396,6 +397,7 @@ To check again after a change of the engine: `dotnet test`, then the scripts in 
 - Message boxes block a test: `Dialogs.Instead` takes their place, per thread.
 - `UpdateRehearsal` works with the real folder of kept versions – not on a computer whose owner has some there.
 - SQLite begins a transaction in a read-only file without a word; only a write says it cannot be written.
+- What passes here may fail on GitHub's slower machine. To see it here: two processor cores (`ProcessorAffinity = 3`) and a short sleep in `Database.Use` while the connection is open.
 - Run the tests with nothing else running: a build or a publish beside them has made window tests wait for 60 seconds.
 - Windows PowerShell 5.1 writes a byte order mark with `-Encoding UTF8`; long scripts go to a file, not into a command line.
 - `dotnet test` on the solution does not rebuild the Release build of the command line tool – build it before comparing outputs.
