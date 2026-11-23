@@ -1,0 +1,54 @@
+# A tag v1.2.3 publishes version 1.2.3: one self-contained .exe in a zip.
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+
+      - name: The tag is the version
+        id: version
+        run: |
+          $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag $env:GITHUB_REF_NAME, but the version is $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: dotnet test -c Release
+
+      - name: Publish
+        run: dotnet publish src/MicroinvestConvert.App -p:PublishProfile=win-x64
+
+      - name: Pack
+        run: |
+          $zip = "MicroinvestConvert-${{ steps.version.outputs.version }}-win-x64.zip"
+          Compress-Archive -Path publish/MicroinvestConvert.exe -DestinationPath $zip
+          "zip=$zip" >> $env:GITHUB_ENV
+
+      - name: Notes of this version
+        run: |
+          $version = [regex]::Escape("${{ steps.version.outputs.version }}")
+          $text = [IO.File]::ReadAllText("CHANGELOG.md")
+          $match = [regex]::Match($text, "(?ms)^## $version\b[^\r\n]*\r?\n(.*?)(?=^## |\z)")
+          if (-not $match.Success) { throw "CHANGELOG.md has no section for this version" }
+          [IO.File]::WriteAllText("notes.md", $match.Groups[1].Value.Trim())
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME $env:zip --title "$env:GITHUB_REF_NAME" --notes-file notes.md --verify-tag

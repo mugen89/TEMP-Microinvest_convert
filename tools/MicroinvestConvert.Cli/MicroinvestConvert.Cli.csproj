@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Console converter: for checks against real files and for comparing two
+       versions of the engine. Not shipped. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>MicroinvestConvert.Cli</RootNamespace>
+    <AssemblyName>miconvert</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MicroinvestConvert.Core\MicroinvestConvert.Core.csproj" />
+  </ItemGroup>
+
+</Project>

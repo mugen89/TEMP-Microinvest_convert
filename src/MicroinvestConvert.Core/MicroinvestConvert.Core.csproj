@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The conversion engine. No UI and no Windows dependency on purpose: it is
+       meant to be moved into the web edition unchanged once it is approved. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>MicroinvestConvert.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ExcelDataReader" Version="3.8.0" />
+    <PackageReference Include="NPOI" Version="2.7.4" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MicroinvestConvert.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,15 @@
+<Project>
+  <!-- One version for the whole solution. A release tag must match it: v$(Version). -->
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <Product>Microinvest Convert</Product>
+    <NeutralLanguage>bg</NeutralLanguage>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Package advisories are reported, never a build break. -->
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+</Project>

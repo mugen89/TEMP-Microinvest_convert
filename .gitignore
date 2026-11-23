@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+TestResults/
+*.user
+*.suo
+.vs/
+.idea/
+
+# This repository is PUBLIC. Workbooks (client exports, converted files, the
+# Microinvest sample) stay on the machine and are never committed.
+*.xls
+*.xlsx
+*.xlsm
+*.csv
+samples/

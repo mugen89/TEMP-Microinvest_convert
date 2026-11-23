@@ -1,0 +1,21 @@
+# Builds and tests every push.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+      - run: dotnet build -c Release
+      - run: dotnet test -c Release --no-build
