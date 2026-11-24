@@ -25,6 +25,8 @@ internal sealed class SettingsForm : AppForm
         "По една стойност за всяка сума (2;2)", "Една стойност, когато всички са еднакви (2)");
     private readonly ComboBox _vatLines = Make.Combo(330,
         "Общо за документа (602;621;453/1)", "След всяка сметка (602;453/1;621;453/1)");
+    private readonly ComboBox _currencyAmounts = Make.Combo(330,
+        "С валутата: евро (валута|курс|фиксинг)", "Само в евро");
     private readonly CheckBox _updates;
     private readonly Grid<Mapping> _mappings = new();
     private readonly List<Mapping> _mappingRows = [];
@@ -56,6 +58,7 @@ internal sealed class SettingsForm : AppForm
         _noDiary.SelectedIndex = (int)general.NoDiary;
         _dealFormat.SelectedIndex = (int)general.DealTypeFormat;
         _vatLines.SelectedIndex = (int)general.VatLines;
+        _currencyAmounts.SelectedIndex = (int)general.CurrencyAmounts;
 
         var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(12, 5), Margin = new Padding(8, 8, 8, 0) };
         tabs.TabPages.Add(Page("ДДС сметки", BuildVatAccounts()));
@@ -134,8 +137,10 @@ internal sealed class SettingsForm : AppForm
         table.Controls.Add(_dealFormat, 1, 0);
         table.Controls.Add(Make.Label("ДДС в сумите (кол. A)"), 0, 1);
         table.Controls.Add(_vatLines, 1, 1);
-        table.Controls.Add(Make.Label("Покупки „без ДДС дневник“"), 0, 2);
-        table.Controls.Add(_noDiary, 1, 2);
+        table.Controls.Add(Make.Label("Документ във валута (кол. A)"), 0, 2);
+        table.Controls.Add(_currencyAmounts, 1, 2);
+        table.Controls.Add(Make.Label("Покупки „без ДДС дневник“"), 0, 3);
+        table.Controls.Add(_noDiary, 1, 3);
 
         return Make.Stack(
             table,
@@ -156,7 +161,7 @@ internal sealed class SettingsForm : AppForm
         _mappings.BorderStyle = BorderStyle.FixedSingle;
         _mappings.AddColumn(new() { Header = "Във файла", Width = 110, Get = m => m.Source });
         _mappings.AddColumn(new() { Header = "В Делта Pro", Width = 110, Get = m => m.Target });
-        _mappings.AddColumn(new() { Header = "Валута", Width = 80, Center = true, Get = m => m.Currency, Tip = "На валутна сметка в Делта Pro" });
+        _mappings.AddColumn(new() { Header = "Валута", Width = 80, Center = true, Get = m => m.Currency, Tip = "EUR – сумите по сметката са само в евро; друга – валутата, в която се води" });
         _mappings.AddColumn(new() { Header = "Важи за", Width = 200, Fill = true, Get = m => m.Client?.Name ?? "Всички фирми" });
         _mappings.SortRequested += () => _mappings.SetRows(_mappingRows);
         _mappings.SetRows(_mappingRows);
@@ -217,6 +222,7 @@ internal sealed class SettingsForm : AppForm
         general.NoDiary = (NoDiaryMode)_noDiary.SelectedIndex;
         general.DealTypeFormat = (DealTypeFormat)_dealFormat.SelectedIndex;
         general.VatLines = (VatLines)_vatLines.SelectedIndex;
+        general.CurrencyAmounts = (CurrencyAmounts)_currencyAmounts.SelectedIndex;
         _app.Settings.CheckForUpdates = _updates.Checked;
 
         var changed = KeepMappings();

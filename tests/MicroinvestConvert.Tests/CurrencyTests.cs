@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Output;
@@ -91,13 +93,6 @@ public class CurrencyTests
         var doc = Purchases.Purchase(1d, "1", 100, 20, ("T", "USD"), ("B", "КИ"), ("C", 3d)).Single(rates: Rates);
         Assert.Equal(("-80;-16", true), (doc.Amounts(), doc.Has(IssueCode.SignFlipped)));
         Assert.Contains("Ако трябва курсът на фактурата", Message(doc, IssueCode.CreditNoteRate));
-    }
-
-    [Fact]
-    public void Cash_is_paid_in_euro()
-    {
-        var batch = Purchases.Purchase(1d, "1", 1000, 200, ("T", "USD"), ("AH", "В брой"), ("AJ", "501")).Process(rates: Rates);
-        Assert.Equal(["800;160", "960"], OperationRows.Build(batch, ConverterOptions.Default).Select(r => r.Cells[0]));
     }
 
     // ----- another date, another rate -----
@@ -385,50 +380,202 @@ public class CurrencyTests
         Assert.Equal((true, new DateTime(2026, 9, 10)), (doc.WillExport, doc.UnknownRateDay));
     }
 
-    // ----- currency accounts -----
+    // ----- with their currency in column A: euro (currency|rate|fixing) -----
 
     private static ConverterSettings With(string account, string currency) => new() { AccountCurrencies = { [account] = currency } };
-
-    private static List<string[]> Rows(TestSheet sheet, ConverterSettings settings, IExchangeRates? rates = null)
+    private static ConverterSettings EuroOnly(string account = "", string currency = "")
     {
-        var options = new ConverterOptions(settings);
+        var settings = new ConverterSettings { CurrencyAmounts = CurrencyAmounts.EuroOnly };
+        if (account.Length > 0) settings.AccountCurrencies[account] = currency;
+        return settings;
+    }
+
+    private static List<string[]> Rows(TestSheet sheet, ConverterSettings? settings = null, IExchangeRates? rates = null, ClientSettings? client = null,
+        Action<OperationDocument>? edit = null)
+    {
+        var options = new ConverterOptions(settings ?? new ConverterSettings(), client);
         var batch = sheet.Read();
+        edit?.Invoke(batch.Documents[0]);
         new DocumentProcessor(options, rates ?? Rates).Process(batch);
         return OperationRows.Build(batch, options).Select(r => r.Cells).ToList();
     }
 
-    [Fact]
-    public void An_amount_on_a_currency_account_carries_its_currency_as_in_the_model()
+    /// <summary>The amounts of column A, taken apart: euro, currency, rate, fixing.</summary>
+    private static List<(decimal Euro, decimal Currency, decimal Rate, decimal Fixing)> Parse(string amounts) => amounts.Split(';').Select(a =>
     {
-        var rows = Rows(Foreign.Invoice(1d, "INV-1", 900, "USD", null), With("4011", "USD"));
-        Assert.Equal(("782.61 (900|0.869565|0.869565)", "602/1-4011"), (rows[0][0], rows[0][1]));
+        var m = Regex.Match(a, @"^(-?\d+(?:\.\d{1,2})?) \((-?\d+(?:\.\d{1,2})?)\|(\d+(?:\.\d+)?)\|(\d+(?:\.\d+)?)\)$");
+        Assert.True(m.Success, a);
+        decimal Number(int group) => decimal.Parse(m.Groups[group].Value, CultureInfo.InvariantCulture);
+        return (Number(1), Number(2), Number(3), Number(4));
+    }).ToList();
+
+    [Fact]
+    public void An_amount_in_a_currency_carries_it_as_in_the_model()
+    {
+        // Model.xls: 2000 (1000|2.00|1.95583) – the base currency is the amount times the rate.
+        var rows = Rows(Foreign.Invoice(1d, "INV-1", 900, "USD", null));
+        Assert.Equal(("782.61 (900|0.86957|0.86957)", "602/1-4011"), (rows[0][0], rows[0][1]));
+        Assert.Equal("625 (500|1.25|1.25)", Rows(Sales.Sale(1d, "1", 500, 0, ("AG", 500d), ("T", "GBP")))[0][0]);
+        Assert.Equal("-625 (-500|1.25|1.25)", Rows(Sales.Sale(1d, "1", -500, 0, ("AG", -500d), ("T", "GBP"), ("B", "КИ"), ("C", 3d)))[0][0]);
     }
 
     [Fact]
-    public void Every_amount_against_it_and_the_payment_carry_it_too()
+    public void Every_amount_of_a_document_and_its_payment_carry_it()
     {
-        var sheet = Purchases.Purchase(1d, "1", 1000, 200, ("T", "USD"), ("AI", "401/2"), ("AH", "В брой"), ("AJ", "501"));
-        var rows = Rows(sheet, With("401/2", "USD"));
-        Assert.Equal("800 (1000|0.8|0.8);160 (200|0.8|0.8)", rows[0][0]);
+        var rows = Rows(Purchases.Purchase(1d, "1", 1000, 200, ("T", "USD"), ("AI", "401/2"), ("AH", "В брой"), ("AJ", "501")));
+        Assert.Equal(("800 (1000|0.8|0.8);160 (200|0.8|0.8)", "601/5;453/1-401/2", "2;2"), (rows[0][0], rows[0][1], rows[0][OperationsLayout.DealType]));
         Assert.Equal(("960 (1200|0.8|0.8)", "401/2-501"), (rows[1][0], rows[1][1]));
+        Assert.Equal("100;20", Rows(Purchases.Purchase(1d, "1", 100, 20))[0][0]);   // in euro there is nothing to add
     }
 
     [Fact]
-    public void The_rate_of_the_operation_and_the_fixing_may_differ()
+    public void A_credit_note_with_positive_amounts_is_turned_in_both()
     {
-        var sheet = Purchases.Purchase(1d, "1", 1000, 0, ("T", "USD"), ("W", "0%"), ("AI", "401/2"));
-        var options = new ConverterOptions(With("401/2", "USD"));
-        var batch = sheet.Read();
-        batch.Documents[0].TrySet(DocField.Rate, "1,28", out _);
-        new DocumentProcessor(options, Rates).Process(batch);
-        Assert.Equal("781.25 (1000|0.78125|0.8)", OperationRows.Build(batch, options)[0].Cells[0]);
+        var rows = Rows(Foreign.Invoice(1d, "INV-1", 115, "USD", null, ("B", "КИ"), ("C", 3d)));
+        Assert.Equal("-100 (-115|0.86957|0.86957)", rows[0][0]);
     }
 
     [Fact]
-    public void The_euro_of_the_file_give_the_rate_of_the_operation()
+    public void The_rate_is_the_one_of_the_conversion_and_the_fixing_the_official_one()
     {
-        var rows = Rows(Foreign.Invoice(1d, "INV-1", -100, "USD", -86.90m, ("B", "КИ"), ("C", 3d)), With("4011", "USD"));
-        Assert.Equal("-86.9 (-100|0.869|0.869565)", rows[0][0]);
+        var sheet = Purchases.Purchase(1d, "1", 1000, 0, ("T", "USD"), ("W", "0%"));
+        Assert.Equal("781.25 (1000|0.78125|0.8)", Rows(sheet, edit: d => d.TrySet(DocField.Rate, "1,28", out _))[0][0]);
+        Assert.Equal("833.33 (1000|0.83333|0.83333)", Rows(sheet, edit: d => d.TrySet(DocField.RateDate, "14.06.2026", out _))[0][0]);   // both of that day
+        Assert.Equal("500 (1000|0.5|0.5)", Rows(sheet, rates: NoRates.Instance, edit: d => d.TrySet(DocField.Rate, "2", out _))[0][0]);   // no other is known
+    }
+
+    [Fact]
+    public void The_euro_of_the_file_by_the_official_rate_have_no_rate_of_their_own()
+    {
+        // 29 / 1.15 = 25.2174: rounded, they come to 0.869655 – which would look like a difference of rates.
+        Assert.Equal("25.22 (29|0.86957|0.86957)", Rows(Foreign.Invoice(1d, "INV-1", 29, "USD", 25.22m))[0][0]);
+        Assert.Equal("25.23 (29|0.86957|0.86957)", Rows(Foreign.Invoice(1d, "INV-1", 29, "USD", 25.23m))[0][0]);   // within its rounding
+    }
+
+    [Fact]
+    public void The_euro_of_the_file_by_another_rate_give_the_rate_of_the_operation()
+    {
+        Assert.Equal("-86.9 (-100|0.869|0.86957)", Rows(Foreign.Invoice(1d, "INV-1", -100, "USD", -86.90m, ("B", "КИ"), ("C", 3d)))[0][0]);
+
+        // Every amount is what its currency comes to by its own rate.
+        var several = Foreign.Invoice(1d, "INV-1", 100, "USD", 90).Invoice(1d, "INV-1", 3, "USD", 2.71m, ("L", "601")).Invoice(1d, "INV-1", 50, "USD", 43.48m, ("L", "609"));
+        Assert.Equal("90 (100|0.9|0.86957);43.48 (50|0.86957|0.86957);2.71 (3|0.90333|0.86957)", Rows(several)[0][0]);
+
+        // Without rates of any kind there is only the one of the file.
+        Assert.Equal("86.27 (100|0.8627|0.8627)", Rows(Foreign.Invoice(1d, "INV-1", 100, "USD", 86.27m), rates: NoRates.Instance)[0][0]);
+    }
+
+    [Fact]
+    public void The_euro_typed_for_a_row_give_the_rate_of_its_amount_only()
+    {
+        var sheet = Foreign.Invoice(1d, "INV-1", 100, "USD", 86.96m).Invoice(1d, "INV-1", 50, "USD", 43.48m, ("L", "601"), ("AJ", "В брой"), ("AL", "501"));
+        void TypeEuro(OperationDocument d) => Assert.True(d.Lines[1].TrySet(LineField.Euro, "45", out _));
+        // Six decimals: with five, 150 USD would be a cent more.
+        Assert.Equal("86.96 (100|0.869565|0.869565);45 (50|0.9|0.869565)", Rows(sheet, edit: TypeEuro)[0][0]);
+
+        // Also when the rest is by the rate of another day: USD 1.16.
+        Assert.Equal("86.21 (100|0.86207|0.86207);45 (50|0.9|0.86207)", Rows(sheet, edit: d =>
+        {
+            TypeEuro(d);
+            d.TrySet(DocField.RateDate, "13.09.2026", out _);
+        })[0][0]);
+    }
+
+    [Fact]
+    public void A_file_that_contradicts_itself_is_written_in_euro_only()
+    {
+        var sheet = Foreign.Invoice(1d, "INV-1", -100, "USD", 86.96m);
+        Assert.Equal("86.96", Rows(sheet)[0][0]);
+        Assert.True(sheet.Single(rates: Rates).Has(IssueCode.RateDiffers));
+    }
+
+    [Theory]
+    [InlineData("GBP", 0.8437, 640)]
+    [InlineData("USD", 1.1357, 123456.78)]
+    [InlineData("USD", 1.1357, 9876543.21)]
+    [InlineData("JPY", 174.35, 250000)]
+    [InlineData("HUF", 373.55, 1999)]
+    [InlineData("IDR", 20071.37, 75000000)]
+    public void The_rate_has_the_digits_that_give_the_amount_back(string currency, decimal perEuro, decimal amount)
+    {
+        var rates = new SomeRates().Add(currency, "10.06.2026", perEuro);
+        var row = Parse(Rows(Sales.Sale(1d, "1", amount, 0, ("AG", (double)amount), ("T", currency)), rates: rates)[0][0]).Single();
+        Assert.Equal((amount, Math.Round(amount / perEuro, 2, MidpointRounding.AwayFromZero)), (row.Currency, row.Euro));
+        Assert.Equal((row.Euro, row.Rate), (Math.Round(row.Currency * row.Rate, 2, MidpointRounding.AwayFromZero), row.Fixing));
+        Assert.InRange(row.Rate * perEuro, 0.99998m, 1.00002m);
+    }
+
+    [Fact]
+    public void Any_amounts_come_back_from_what_is_written()
+    {
+        var random = new Random(20261123);
+        for (int i = 0; i < 400; i++)
+        {
+            decimal perEuro = Math.Round((decimal)Math.Pow(10, random.NextDouble() * 5 - 1), 4) + 0.0001m;
+            var rates = new SomeRates().Add("USD", "10.06.2026", perEuro);
+            var sheet = Purchases;
+            decimal total = 0m;
+            int rows = random.Next(1, 5);
+            for (int r = 0; r < rows; r++)
+            {
+                decimal amount = Math.Round((decimal)Math.Pow(10, random.NextDouble() * 6), 2) * (random.Next(8) == 0 ? -1 : 1);
+                total += amount;
+                sheet = sheet.Purchase(1d, "1", amount, 0, ("T", "USD"), ("W", "0%"), ("K", "60" + r), ("M", "-"));
+            }
+
+            string cell = Rows(sheet, rates: rates)[0][0];
+            var written = Parse(cell);
+            Assert.Equal(total, written.Sum(w => w.Currency));
+            Assert.Single(written.Select(w => (w.Rate, w.Fixing)).Distinct());
+            Assert.Equal(Math.Round(total / perEuro, 2, MidpointRounding.AwayFromZero), written.Sum(w => w.Euro));
+            foreach (var w in written)   // a cent may go to another amount, so that they add up
+                Assert.InRange(Math.Abs(Math.Round(w.Currency * w.Rate, 2, MidpointRounding.AwayFromZero) - w.Euro), 0m, 0.01m);
+        }
+    }
+
+    [Fact]
+    public void Leva_are_only_another_way_to_say_euro()
+    {
+        Assert.Equal("511.29", Rows(Purchases.Purchase(1d, "1", 1000, 0, ("T", "BGN"), ("W", "0%")))[0][0]);
+        Assert.Equal("511.29 (1000|0.51129|0.51129)", Rows(Purchases.Purchase(1d, "1", 1000, 0, ("T", "BGN"), ("W", "0%")), With("401", "BGN"))[0][0]);
+    }
+
+    [Fact]
+    public void A_document_in_several_currencies_is_in_euro_only_and_it_is_said()
+    {
+        var sheet = Foreign.Invoice(1d, "INV-1", 30, "USD", 26.09m).Invoice(1d, "INV-1", 20, "GBP", 23.53m, ("L", "601"));
+        Assert.Equal("26.09;23.53", Rows(sheet)[0][0]);
+        Assert.Contains("в няколко валути (USD, GBP)", Message(sheet.Single(rates: Rates), IssueCode.AccountCurrency));
+        Assert.True(sheet.Single(rates: Rates).WillExport);
+        Assert.False(sheet.Single(EuroOnly(), rates: Rates).Has(IssueCode.AccountCurrency));
+
+        var partly = Purchases.Purchase(1d, "1", 1000, 0, ("T", "USD"), ("W", "0%")).Purchase(1d, "1", 500, 0, ("W", "0%"), ("K", "602"), ("M", "-"));
+        Assert.Equal("800;500", Rows(partly)[0][0]);
+        Assert.Contains("USD, EUR", Message(partly.Single(rates: Rates), IssueCode.AccountCurrency));
+    }
+
+    [Fact]
+    public void With_the_setting_everything_is_in_euro_only_except_the_marked_accounts()
+    {
+        var sheet = Purchases.Purchase(1d, "1", 1000, 200, ("T", "USD"), ("AH", "В брой"), ("AJ", "501"));
+        Assert.Equal(["800;160", "960"], Rows(sheet, EuroOnly()).Select(r => r[0]));
+        Assert.Equal(["800 (1000|0.8|0.8);160 (200|0.8|0.8)", "960 (1200|0.8|0.8)"], Rows(sheet, EuroOnly("401", "USD")).Select(r => r[0]));
+        Assert.Equal(["800;160", "960 (1200|0.8|0.8)"], Rows(sheet, EuroOnly("501", "USD")).Select(r => r[0]));
+        Assert.Equal(["800 (1000|0.8|0.8);160", "960"], Rows(sheet, EuroOnly("601/5", "USD")).Select(r => r[0]));   // VAT has none of its own
+    }
+
+    [Fact]
+    public void An_account_marked_with_the_euro_is_an_ordinary_one()
+    {
+        var sheet = Purchases.Purchase(1d, "1", 1000, 200, ("T", "USD"));
+        Assert.Equal("800;160", Rows(sheet, With("401", "EUR"))[0][0]);
+        Assert.False(sheet.Single(With("401", "EUR"), rates: Rates).Has(IssueCode.AccountCurrency));
+
+        var client = new ClientSettings { AccountCurrencies = { ["401"] = "EUR", ["402"] = "GBP" } };
+        Assert.Equal("800;160", Rows(sheet, client: client)[0][0]);
+        var options = new ConverterOptions(With("401", "USD"), client);
+        Assert.Equal(("EUR", "GBP", ""), (options.AccountCurrency("401", ""), options.AccountCurrency("402", ""), options.AccountCurrency("403", "")));
+        Assert.Equal("USD", new ConverterOptions(With("401", "USD")).AccountCurrency("401", "7"));   // a sub-account of it
     }
 
     [Fact]
@@ -437,19 +584,13 @@ public class CurrencyTests
         var sheet = Purchases
             .Purchase(1d, "1", 1000, 0, ("T", "USD"), ("W", "0%"), ("K", "504"), ("M", "1"))
             .Purchase(1d, "1", 500, 0, ("T", "USD"), ("W", "0%"), ("K", "602"), ("M", "-"));
-        Assert.Equal("800 (1000|0.8|0.8);400", Rows(sheet, With("504/1", "USD"))[0][0]);
+        var settings = With("401", "EUR");
+        settings.AccountCurrencies["504/1"] = "USD";
+        Assert.Equal("800 (1000|0.8|0.8);400", Rows(sheet, settings)[0][0]);
     }
 
     [Fact]
-    public void Other_accounts_and_documents_in_euro_are_written_in_euro_only()
-    {
-        Assert.Equal("800;160", Rows(Purchases.Purchase(1d, "1", 1000, 200, ("T", "USD")), With("402", "USD"))[0][0]);
-        Assert.Equal("1000;200", Rows(Purchases.Purchase(1d, "1", 1000, 200), With("401", "USD"))[0][0]);
-        Assert.Equal("800;160", Rows(Purchases.Purchase(1d, "1", 1000, 200, ("T", "USD")), new ConverterSettings())[0][0]);
-    }
-
-    [Fact]
-    public void A_currency_account_in_another_currency_is_pointed_out_and_written_in_euro()
+    public void An_account_in_another_currency_is_pointed_out_and_written_in_euro()
     {
         var sheet = Purchases.Purchase(1d, "1", 1000, 200, ("T", "USD"));
         Assert.Equal("800;160", Rows(sheet, With("401", "GBP"))[0][0]);
@@ -457,16 +598,6 @@ public class CurrencyTests
         Assert.Contains("Сметка 401 е във валута GBP, а документът е в USD", Message(doc, IssueCode.AccountCurrency));
         Assert.Contains("документът е в EUR", Message(Purchases.Purchase(1d, "1", 1000, 200).Single(With("401", "GBP")), IssueCode.AccountCurrency));
         Assert.False(sheet.Single(With("401", "USD"), rates: Rates).Has(IssueCode.AccountCurrency));
-    }
-
-    [Fact]
-    public void For_a_client_an_account_may_be_an_ordinary_one()
-    {
-        var general = With("401", "USD");
-        var client = new ClientSettings { AccountCurrencies = { ["401"] = "EUR", ["402"] = "GBP" } };
-        var options = new ConverterOptions(general, client);
-        Assert.Equal(("", "GBP", ""), (options.AccountCurrency("401", ""), options.AccountCurrency("402", ""), options.AccountCurrency("403", "")));
-        Assert.Equal("USD", new ConverterOptions(general).AccountCurrency("401", "7"));   // a sub-account of it
     }
 
     [Fact]

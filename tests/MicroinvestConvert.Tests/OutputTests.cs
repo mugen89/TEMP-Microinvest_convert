@@ -231,6 +231,7 @@ public class SettingsTests
         file.General.Rounding = VatRounding.Truncate;
         file.General.Accounts["401"] = "401/1";
         file.General.AccountCurrencies["401/2"] = "USD";
+        file.General.CurrencyAmounts = CurrencyAmounts.EuroOnly;
         file.AddRecent(@"C:\a.xlsx");
         new SettingsStore(path).Save(file);
 
@@ -239,7 +240,7 @@ public class SettingsTests
         Assert.Equal(("453/7", "453/2/1"), (options.PurchaseVatAccount, options.SaleVatAccount));
         Assert.Equal(("401/1", "601/9"), (options.MappedAccount("401"), options.MappedAccount("601/5")));
         Assert.Equal(("USD", "USD", ""), (options.AccountCurrency("401", "2"), options.AccountCurrency("401/2", ""), options.AccountCurrency("401", "")));
-        Assert.Equal(VatRounding.Truncate, loaded.General.Rounding);
+        Assert.Equal((VatRounding.Truncate, CurrencyAmounts.EuroOnly), (loaded.General.Rounding, loaded.General.CurrencyAmounts));
         Assert.Equal([@"C:\a.xlsx"], loaded.RecentFiles);
         Assert.True(options.HasVatAccountException);
         Directory.Delete(Path.GetDirectoryName(path)!, true);

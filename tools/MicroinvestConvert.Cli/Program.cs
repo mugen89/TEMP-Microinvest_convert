@@ -1,11 +1,12 @@
 // miconvert <source> [--out file.xls] [--rows] [--issues] [--skipped] [--no-diary 1|3|skip] [--vat total|account]
-//                    [--rates file.db] [--rate-date dd.MM.yyyy] [--currency-account 401/2=USD]
+//                    [--rates file.db] [--rate-date dd.MM.yyyy] [--euro-only] [--currency-account 401/2=USD]
 //
 // Converts an AI Accounting export the way the program does it with its default settings.
 // --rows prints the rows tab-separated (A..P), which makes two versions easy to compare;
 // --no-diary and --vat are the two settings of „Настройки → Файл" that change them most.
 // --rates takes the exchange rates of a database of the program; --rate-date uses another day
-// for every document in another currency.
+// for every document in another currency; --euro-only writes them without their currency, except on
+// the account of --currency-account.
 //
 // miconvert rates <file.db> <from dd.MM.yyyy> [to]   downloads the exchange rates into a database
 // miconvert rates <file.db>                          says which days it has
@@ -26,7 +27,7 @@ Console.OutputEncoding = new UTF8Encoding(false);
 if (args.Length == 0)
 {
     Console.Error.WriteLine("miconvert <source> [--out file.xls] [--rows] [--issues] [--skipped] [--no-diary 1|3|skip] [--vat total|account] " +
-                            "[--rates file.db] [--rate-date dd.MM.yyyy] [--currency-account 401/2=USD]");
+                            "[--rates file.db] [--rate-date dd.MM.yyyy] [--euro-only] [--currency-account 401/2=USD]");
     Console.Error.WriteLine("miconvert rates <file.db> [<from dd.MM.yyyy> [<to>]]");
     return 2;
 }
@@ -42,6 +43,7 @@ if (Value("--no-diary") is { } noDiary)
     settings.NoDiary = noDiary switch { "1" => NoDiaryMode.Internal, "3" => NoDiaryMode.NoCredit, _ => NoDiaryMode.Skip };
 if (Value("--vat") is { } vat)
     settings.VatLines = vat == "total" ? VatLines.PerDealType : VatLines.PerAccount;
+if (args.Contains("--euro-only")) settings.CurrencyAmounts = CurrencyAmounts.EuroOnly;
 if (Value("--currency-account") is { } account && account.Split('=') is [var number, var code])
     settings.AccountCurrencies[number] = code;
 

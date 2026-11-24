@@ -434,8 +434,10 @@ public sealed class InteractionTests : IDisposable
             Field<TextBox>(form, "_clientPurchaseVat").Text = "453/1/9";
             Assert.Equal("3 – без данъчен кредит (влиза в дневника, к. 9)", Field<ComboBox>(form, "_noDiary").Text);
             Assert.Equal("След всяка сметка (602;453/1;621;453/1)", Field<ComboBox>(form, "_vatLines").Text);
+            Assert.Equal("С валутата: евро (валута|курс|фиксинг)", Field<ComboBox>(form, "_currencyAmounts").Text);
             Field<ComboBox>(form, "_dealFormat").SelectedIndex = 1;
             Field<ComboBox>(form, "_noDiary").SelectedIndex = 2;
+            Field<ComboBox>(form, "_currencyAmounts").SelectedIndex = 1;
             Click(form, "Запази");
         }
 
@@ -443,7 +445,7 @@ public sealed class InteractionTests : IDisposable
         Assert.Equal("453/1/9", saved.OptionsFor(batch).PurchaseVatAccount);
         Assert.Single(saved.Clients.All);
         Assert.Equal(Core.Settings.DealTypeFormat.SingleWhenEqual, saved.Settings.General.DealTypeFormat);
-        Assert.Equal(Core.Settings.NoDiaryMode.Skip, saved.Settings.General.NoDiary);
+        Assert.Equal((Core.Settings.NoDiaryMode.Skip, Core.Settings.CurrencyAmounts.EuroOnly), (saved.Settings.General.NoDiary, saved.Settings.General.CurrencyAmounts));
 
         OnScreenNow(batch, view => Assert.Equal("ДДС сметка: 453/1/9", Field<Label>(view, "_exception").Text));
     });

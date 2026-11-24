@@ -244,7 +244,7 @@ public static class CheckCatalog
         {
             Code = IssueCode.AccountCurrency, Area = CheckArea.Currency, Severity = IssueSeverity.Warning,
             Title = "Сметка в друга валута", Fields = [DocField.CounterAccount, DocField.Currency],
-            Help = "В „Сметки“ сметката е отбелязана като валутна, но документът не е в нейната валута. Сумата по нея се записва само в евро.",
+            Help = "Сметка се води в една валута. Когато в „Сметки“ е отбелязана друга или документът е в няколко валути, сумата се записва само в евро.",
         },
         new()
         {

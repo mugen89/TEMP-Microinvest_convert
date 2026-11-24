@@ -85,6 +85,14 @@ public class VisualTests
                 Shot(window, Path.Combine(folder, $"file{i + 1}-documents.png"));
 
                 var work = Find<WorkView>(window);
+                if (batch.Documents.FindIndex(d => d.CounterCurrency.Length > 0) is var inCurrency and >= 0)
+                {
+                    var documents = All(work).OfType<DataGridView>().First();
+                    documents.CurrentCell = documents[4, inCurrency];
+                    Pump();
+                    Shot(window, Path.Combine(folder, $"file{i + 1}-currency.png"));
+                }
+
                 var tabs = Find<TabControl>(work);
                 tabs.SelectedIndex = 1;
                 Pump();

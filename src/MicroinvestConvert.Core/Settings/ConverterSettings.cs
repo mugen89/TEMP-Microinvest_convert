@@ -1,5 +1,4 @@
 using MicroinvestConvert.Core.Checks;
-using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
 using MicroinvestConvert.Core.Values;
@@ -52,6 +51,16 @@ public enum NoDiaryMode
     Skip,
 }
 
+/// <summary>What an amount of a document in another currency looks like in column A.</summary>
+public enum CurrencyAmounts
+{
+    /// <summary>„euro (currency|rate|fixing)", as Model.xls has it.</summary>
+    WithCurrency,
+
+    /// <summary>Euro only, except on the accounts that are marked with a currency.</summary>
+    EuroOnly,
+}
+
 /// <summary>The settings that apply to every client.</summary>
 public sealed class ConverterSettings
 {
@@ -81,6 +90,7 @@ public sealed class ConverterSettings
     public DealTypeFormat DealTypeFormat { get; set; } = DealTypeFormat.PerAmount;
     public VatLines VatLines { get; set; } = VatLines.PerAccount;
     public NoDiaryMode NoDiary { get; set; } = NoDiaryMode.NoCredit;
+    public CurrencyAmounts CurrencyAmounts { get; set; } = CurrencyAmounts.WithCurrency;
 
     /// <summary>
     /// The checks that are switched off, by the name of their code. Names and not codes, so that
@@ -99,7 +109,7 @@ public sealed class ConverterSettings
     /// <summary>Account in the file (with its analytic, e.g. 601/5) → account in Делта Pro.</summary>
     public Dictionary<string, string> Accounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Account in the file → the currency it is kept in, in Делта Pro.</summary>
+    /// <summary>Account in the file → the currency it is kept in, in Делта Pro; the euro for an ordinary account.</summary>
     public Dictionary<string, string> AccountCurrencies { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public ConverterSettings Clone()
@@ -129,7 +139,7 @@ public sealed class ClientSettings
     /// <summary>Account in the file → account in Делта Pro.</summary>
     public Dictionary<string, string> Accounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Account in the file → the currency it is kept in, in Делта Pro.</summary>
+    /// <summary>Account in the file → the currency it is kept in, in Делта Pro; the euro for an ordinary account.</summary>
     public Dictionary<string, string> AccountCurrencies { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
@@ -169,8 +179,8 @@ public sealed class ConverterOptions
     }
 
     /// <summary>
-    /// The currency an account of the file is kept in, in Делта Pro: first as marked for the
-    /// account with its sub-account, then for the account alone. Empty = it is not a currency account.
+    /// The currency an account of the file is marked with: first as marked for the account with its
+    /// sub-account, then for the account alone. The euro = an ordinary account; empty = not marked.
     /// </summary>
     public string AccountCurrency(string account, string subAccount)
     {
@@ -180,12 +190,9 @@ public sealed class ConverterOptions
         string? OwnOrCommon(string key)
         {
             if (key.Length == 0) return null;
-            if (Client != null && Client.AccountCurrencies.TryGetValue(key, out var own)) return Plain(own);
-            return General.AccountCurrencies.TryGetValue(key, out var common) ? Plain(common) : null;
+            if (Client != null && Client.AccountCurrencies.TryGetValue(key, out var own) && own.Length > 0) return own;
+            return General.AccountCurrencies.TryGetValue(key, out var common) && common.Length > 0 ? common : null;
         }
-
-        // The euro is not a currency to Делта Pro: for a client it takes back what is marked for everybody.
-        static string Plain(string currency) => currency == Currencies.Euro ? "" : currency;
     }
 
     private static string Pick(string? own, string common) => string.IsNullOrWhiteSpace(own) ? common : own;

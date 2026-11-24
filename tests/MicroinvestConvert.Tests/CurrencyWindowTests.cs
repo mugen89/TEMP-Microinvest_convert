@@ -388,31 +388,72 @@ public sealed class CurrencyWindowTests : IDisposable
         Assert.Equal("Проверки", Field<Button>(view, "_allChecks").Text);
     });
 
-    [Fact]
-    public void The_currency_of_an_account_is_kept_for_the_client_and_written() => WithFile(Dollars(LongAgo), (view, batch, app) =>
+    private static string FirstAmount(WorkView view)
     {
+        Field<TabControl>(view, "_tabs").SelectedIndex = 1;
+        Pump();
+        return (string)((DataGridView)Field<Control>(view, "_preview"))[0, 0].Value!;
+    }
+
+    [Fact]
+    public void An_account_is_marked_as_an_ordinary_one_for_the_client_and_back() => WithFile(Dollars(LongAgo), (view, batch, app) =>
+    {
+        const string WithDollars = @"^[\d.]+ \(1200\|0\.\d+\|0\.\d+\)$";
         Until(() => batch.Documents[0].WillExport);
+        Assert.Matches(WithDollars, FirstAmount(view));   // by itself
+
         Click(view, "Сметки");
         var page = All(Field<ChecksForm>(view, "_checks")).OfType<AccountsPage>().Single();
         var grid = (DataGridView)Field<Control>(page, "_grid");
         int row = Enumerable.Range(0, grid.RowCount).Single(r => Equals(grid[0, r].Value, "401"));
+        Assert.Equal("", Cell(grid, "✎ Валута", row));
         Type(grid, "✎ Валута", row, "щатски");
         Assert.Contains("не е код на валута", Assert.Single(_messages));
+        Type(grid, "✎ Валута", row, "евро");
+        Click(page, "Запомни");
+        Assert.Equal("EUR", app.Clients.Find(batch.ClientEik, batch.ClientName)!.AccountCurrencies["401"]);
+        Assert.Equal(("", false), (batch.Documents[0].CounterCurrency, batch.Documents[0].Has(IssueCode.AccountCurrency)));
+        Assert.Matches(@"^[\d.]+$", FirstAmount(view));
+
+        // Kept in one currency: the document in euro is not in it.
         Type(grid, "✎ Валута", row, "usd");
         Click(page, "Запомни");
+        Assert.True(batch.Documents[1].Has(IssueCode.AccountCurrency));
+        Assert.Matches(WithDollars, FirstAmount(view));
 
-        Assert.Equal("USD", app.Clients.Find(batch.ClientEik, batch.ClientName)!.AccountCurrencies["401"]);
-        Assert.Equal("USD", batch.Documents[0].CounterCurrency);
-        Assert.True(batch.Documents[1].Has(IssueCode.AccountCurrency));   // the one in euro is on it too
-        Field<TabControl>(view, "_tabs").SelectedIndex = 1;
-        Pump();
-        Assert.Matches(@"^[\d.]+ \(1200\|0\.\d+\|0\.\d+\)$", (string)((DataGridView)Field<Control>(view, "_preview"))[0, 0].Value!);
-
-        // Back to an ordinary account.
+        // Nothing marked.
         Type(grid, "✎ Валута", row, "");
         Click(page, "Запомни");
-        Assert.Equal("", batch.Documents[0].CounterCurrency);
+        Assert.Empty(app.Clients.Find(batch.ClientEik, batch.ClientName)!.AccountCurrencies);
+        Assert.Equal(("USD", false), (batch.Documents[0].CounterCurrency, batch.Documents[1].Has(IssueCode.AccountCurrency)));
     }, app => app.Rates.From = LongAgo);
+
+    [Fact]
+    public void How_a_document_will_be_posted_shows_its_currency() => WithFile(Dollars(LongAgo), (view, batch, _) =>
+    {
+        Until(() => batch.Documents[0].WillExport);
+        var postings = (DataGridView)Field<Control>(view, "_postings");
+        Assert.True(Visible(postings, "Във валута"));
+        foreach (int row in new[] { 0, 1 })   // the expense and the supplier
+            Assert.Equal("1200,00 USD", Cell(postings, "Във валута", row).Replace("\u00a0", ""));
+
+        Documents(view).CurrentCell = Documents(view)[4, 1];   // the one in euro
+        Pump();
+        Assert.False(Visible(postings, "Във валута"));
+        Assert.Equal(3, postings.RowCount);
+    }, app => app.Rates.From = LongAgo);
+
+    [Fact]
+    public void Without_the_currency_the_amounts_are_in_euro_only() => WithFile(Dollars(LongAgo), (view, batch, _) =>
+    {
+        Until(() => batch.Documents[0].WillExport);
+        Assert.Matches(@"^[\d.]+$", FirstAmount(view));
+        Assert.False(Visible((DataGridView)Field<Control>(view, "_postings"), "Във валута"));
+    }, app =>
+    {
+        app.Rates.From = LongAgo;
+        app.Settings.General.CurrencyAmounts = CurrencyAmounts.EuroOnly;
+    });
 
     // ----- „Фирми" -----
 

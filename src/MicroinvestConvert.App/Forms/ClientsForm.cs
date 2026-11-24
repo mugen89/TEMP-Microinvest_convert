@@ -131,7 +131,7 @@ internal sealed class ClientsForm : AppForm
         _accounts.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _accounts.AddColumn(new() { Header = "Сметка във файла", Width = 150, Get = a => a.Source });
         _accounts.AddColumn(new() { Header = "В Делта Pro", Width = 150, Get = a => a.Target.Length > 0 ? a.Target : "същата" });
-        _accounts.AddColumn(new() { Header = "Валута", Width = 160, Fill = true, Get = a => a.Currency, Tip = "На сметка, която в Делта Pro е от тип „Валутна“" });
+        _accounts.AddColumn(new() { Header = "Валута", Width = 160, Fill = true, Get = a => a.Currency, Tip = "EUR – сумите по сметката са само в евро; друга – валутата, в която се води" });
         _accounts.SortRequested += RefreshAccounts;
     }
 

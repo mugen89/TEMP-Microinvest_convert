@@ -110,7 +110,7 @@ public sealed class OperationDocument
     public string CounterAccountOut { get; internal set; } = "";
     public string CashAccountOut { get; internal set; } = "";
 
-    /// <summary>The currency those accounts are kept in, in Делта Pro; empty when they are not.</summary>
+    /// <summary>The currency the amounts on those accounts are written with; empty = euro only.</summary>
     public string CounterCurrency { get; internal set; } = "";
     public string CashCurrency { get; internal set; } = "";
 
@@ -141,6 +141,9 @@ public sealed class OperationDocument
 
     /// <summary>The currencies of the rows that are not in euro, in their order.</summary>
     public IReadOnlyList<string> ForeignCurrencies => Lines.Select(CurrencyOf).Where(c => c != Currencies.Euro).Distinct().ToList();
+
+    /// <summary>The currency of every row; empty when they are in euro, or not all in the same one.</summary>
+    public string OnlyCurrency => Lines.Select(CurrencyOf).Distinct().ToList() is [var one] && one != Currencies.Euro ? one : "";
 
     /// <summary>Some amount has to become euro.</summary>
     public bool InForeignCurrency => Lines.Exists(l => CurrencyOf(l) != Currencies.Euro);
@@ -439,6 +442,9 @@ public sealed class EntrySegment
 
     /// <summary>The same in the currency of its rows; null when they are in euro, or in several currencies.</summary>
     public decimal? InCurrency { get; init; }
+
+    /// <summary>The currency the amount is written with; empty = euro only.</summary>
+    public string Currency { get; init; } = "";
 }
 
 public enum VatStatus

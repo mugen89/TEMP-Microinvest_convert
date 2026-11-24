@@ -65,6 +65,13 @@ found in them, the scripts that check them) goes to `private/`, which git ignore
   rate, which is rounded – and added up in its currency before that (`CurrencyRules`;
   dust from dividing line by line once turned a zero total negative). Foreign
   invoices keep the euro of column AI until another date or rate is chosen.
+- **An amount in another currency carries it: `euro (currency|rate|fixing)`** – every
+  document, by default (the owner, 2026-11-23; tying it to marked accounts in 1.2.0
+  was wrong). `Model.xls` multiplies, so the rates there are euro for one unit, the
+  reverse of the published ones, with the digits that give the amount back to the
+  cent (`CurrencyNotation`). Every amount has its own rate when its euro are its own;
+  by the official rate the rate and the fixing are the same text, or Делта Pro would
+  see a difference. `::` is only for material accounts.
 - **A table of rates is kept under the date written on the page**, not the one that
   was asked for: the site answers any day with its last table. When an earlier
   table is the last word is in `RateCalendar.IsFinal`. A page that is not certainly

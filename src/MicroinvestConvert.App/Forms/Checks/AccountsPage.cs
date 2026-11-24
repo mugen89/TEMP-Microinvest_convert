@@ -26,7 +26,7 @@ internal sealed class AccountsPage : CheckPage
         public required string Original { get; init; }
         public string Target { get; set; } = "";
 
-        /// <summary>The currency the account is kept in; empty = it is an ordinary account.</summary>
+        /// <summary>What the account is marked with; the euro = an ordinary account, empty = nothing.</summary>
         public required string OriginalCurrency { get; init; }
         public string Currency { get; set; } = "";
 
@@ -67,12 +67,12 @@ internal sealed class AccountsPage : CheckPage
         _grid.AddColumn(new()
         {
             Header = "✎ Валута", Width = 92, Center = true, Get = r => r.Currency,
-            Tip = "Само за сметка, която в Делта Pro е от тип „Валутна“ – нейната валута, например USD.\n" +
-                  "Документ в тази валута се записва с нея: евро (валута|курс|фиксинг). Празно – сумата е само в евро.",
+            Tip = "Празно – документ във валута се записва с нея: евро (валута|курс|фиксинг).\n" +
+                  "EUR – сумите по сметката се записват само в евро.\n" +
+                  "Друга, например USD – сметката се води в нея; документ в друга валута се записва само в евро.",
             Set = (r, v) =>
             {
                 string currency = Currencies.Normalise(v);
-                if (currency == Currencies.Euro) currency = "";
                 if (currency.Length > 0 && !Currencies.IsCode(currency)) return $"„{v}“ не е код на валута, например USD.";
                 r.Currency = currency;
                 return null;
@@ -108,7 +108,7 @@ internal sealed class AccountsPage : CheckPage
         Controls.Add(Rows(1,
             Note("Сметката се записва, както е във файла: основната сметка, после „/“ и подсметката – 4111 и 1 стават 4111/1, 411/1 и 1 стават 411/1/1. " +
                  "Когато в Делта Pro номерът е друг, напишете го в „В Делта Pro“; запомня се и важи и за следващите файлове. " +
-                 "„Валута“ е само за валутните сметки в Делта Pro."),
+                 "„Валута“ е само за изключения: EUR – сумите по сметката са само в евро; друга – сметката се води в нея."),
             _grid, bar));
         EndLayout();
     }
@@ -185,8 +185,8 @@ internal sealed class AccountsPage : CheckPage
             var options = new ConverterOptions(general, client);
             if (AccountCodes.Format(row.Account, row.Analytic, options) != row.Target)
                 (_onlyClient.Checked ? client!.Accounts : general.Accounts)[row.Key] = row.Target;
-            if (options.AccountCurrency(row.Account, row.Analytic) != row.Currency)
-                (_onlyClient.Checked ? client!.AccountCurrencies : general.AccountCurrencies)[row.Key] = row.Currency.Length > 0 ? row.Currency : Currencies.Euro;
+            if (row.Currency.Length > 0 && options.AccountCurrency(row.Account, row.Analytic) != row.Currency)
+                (_onlyClient.Checked ? client!.AccountCurrencies : general.AccountCurrencies)[row.Key] = row.Currency;
         }
 
         string? problem = Host.App.Save();

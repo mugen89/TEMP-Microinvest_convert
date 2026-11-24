@@ -121,7 +121,7 @@ internal sealed partial class WorkView
         {
             Header = "По фактура", Width = 96, Right = true, Get = InvoiceAmount, Tip = "Сумата на документ във валута",
         }));
-        Field(DocField.Currency, "Валута", 70, tip: "Валутата на сумите във файла. Записва се в евро.");
+        Field(DocField.Currency, "Валута", 70, tip: "Валутата на сумите във файла. Записва се в евро, с валутата в скоби: евро (валута|курс|фиксинг).");
         _currencyColumns.Add(_documents.AddColumn(new()
         {
             Header = "Дата на курса", Width = 108, SortKey = d => UsesDate(d) ? d.RateDate : null,
@@ -133,7 +133,8 @@ internal sealed partial class WorkView
         _currencyColumns.Add(_documents.AddColumn(new()
         {
             Header = "Курс", Width = 76, Right = true, Get = RateText,
-            Tip = "Колко единици валута са едно евро. Въведете друг курс, ако официалният не е нужният; изтрийте го, за да се върне.",
+            Tip = "Колко единици валута са едно евро. Въведете друг курс, ако официалният не е нужният; изтрийте го, за да се върне.\n" +
+                  "Във файла курсът е обратният – евро за единица валута, както е в Model.xls.",
             Set = (d, v) => d.TrySet(DocField.Rate, v, out string error) ? null : error,
         }));
         _fieldOfColumn[_currencyColumns[^1]] = DocField.Rate;

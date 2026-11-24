@@ -12,7 +12,7 @@ namespace MicroinvestConvert.App.Forms;
 internal sealed partial class WorkView
 {
     /// <summary>One row of „Как ще се осчетоводи".</summary>
-    private sealed record Posting(string Side, string Account, string Name, decimal Amount, string Deal, bool IsTotal);
+    private sealed record Posting(string Side, string Account, string Name, decimal Amount, string InCurrency, string Deal, bool IsTotal);
 
     private const string AutoDeal = "авто";
 
@@ -24,7 +24,7 @@ internal sealed partial class WorkView
     private readonly Label _previewTitle = Make.Label("", Theme.Muted);
     private readonly Dictionary<int, LineField> _fieldOfLineColumn = [];
     private OperationDocument? _shown;
-    private int _euroColumn;
+    private int _euroColumn, _inCurrencyColumn;
 
     private void BuildDetails()
     {
@@ -72,6 +72,11 @@ internal sealed partial class WorkView
         _postings.AddColumn(new() { Header = "", Width = 34, Center = true, Get = p => p.Side });
         _postings.AddColumn(new() { Header = "Сметка", Width = 92, Get = p => p.Account });
         _postings.AddColumn(new() { Header = "Сума", Width = 88, Right = true, Get = p => Fmt.Money(p.Amount) });
+        _inCurrencyColumn = _postings.AddColumn(new()
+        {
+            Header = "Във валута", Width = 118, Right = true, Get = p => p.InCurrency,
+            Tip = "Записва се в кол. A след сумата в евро: евро (валута|курс|фиксинг)",
+        });
         _postings.AddColumn(new() { Header = "Вид сделка", Width = 180, Fill = true, Get = p => p.Deal });
         _postings.StyleCell = (p, _, style) =>
         {
@@ -175,8 +180,16 @@ internal sealed partial class WorkView
             _lines.Columns[_euroColumn].Visible = euro;
         }
 
+        var postings = PostingsOf(_shown).ToList();
+        bool inCurrency = postings.Exists(p => p.InCurrency.Length > 0);
+        if (_postings.Columns[_inCurrencyColumn].Visible != inCurrency)
+        {
+            _postings.SetRows([]);
+            _postings.Columns[_inCurrencyColumn].Visible = inCurrency;
+        }
+
         _lines.SetRows(_shown.Lines);
-        _postings.SetRows(PostingsOf(_shown));
+        _postings.SetRows(postings);
         _issues.SetRows(_shown.Issues.OrderByDescending(i => i.IsOpen).ThenByDescending(i => i.Severity));
     }
 
@@ -186,17 +199,20 @@ internal sealed partial class WorkView
         string vies = IsPurchase ? "" : "VIES " + (doc.ViesOverride?.ToString(CultureInfo.InvariantCulture)
                                                    ?? string.Join(";", doc.Segments.Select(s => s.Vies).Distinct()));
 
-        var total = new Posting(one, doc.CounterAccountOut, "", doc.TotalGross, vies, true);
+        var total = new Posting(one, doc.CounterAccountOut, "", doc.TotalGross, With(doc.TotalInCurrency, doc.CounterCurrency), vies, true);
         if (!IsPurchase) yield return total;
         foreach (var s in doc.Segments)
-            yield return new Posting(many, s.Account, s.AccountName, s.Amount, DealTypes.Get(s.DealType).Label, false);
+            yield return new Posting(many, s.Account, s.AccountName, s.Amount, With(s.InCurrency, s.Currency), DealTypes.Get(s.DealType).Label, false);
         if (IsPurchase) yield return total;
 
         if (!doc.IsCash || !Options.General.CashRows) yield break;
         string type = IsPurchase ? DocumentTypes.CashPayment : DocumentTypes.CashReceipt;
-        yield return new Posting("Дт", IsPurchase ? doc.CounterAccountOut : doc.CashAccountOut, "", doc.TotalGross,
+        string paid = With(doc.TotalInCurrency, doc.CounterCurrency.Length > 0 ? doc.CounterCurrency : doc.CashCurrency);
+        yield return new Posting("Дт", IsPurchase ? doc.CounterAccountOut : doc.CashAccountOut, "", doc.TotalGross, paid,
             $"{type} · {DealTypes.Get(DealTypes.Internal).Label}", false);
-        yield return new Posting("Кт", IsPurchase ? doc.CashAccountOut : doc.CounterAccountOut, "", doc.TotalGross, type, false);
+        yield return new Posting("Кт", IsPurchase ? doc.CashAccountOut : doc.CounterAccountOut, "", doc.TotalGross, paid, type, false);
+
+        static string With(decimal? amount, string currency) => amount is { } value && currency.Length > 0 ? $"{Fmt.Money(value)} {currency}" : "";
     }
 
     // ----- preview -----
@@ -207,7 +223,7 @@ internal sealed partial class WorkView
         _preview.ReadOnly = true;
         _preview.SetHeights(24, 30);
 
-        int[] widths = [190, 230, 88, 200, 130, 130, 70, 136, 66, 160, 200, 130, 150, 116, 70, 152];
+        int[] widths = [250, 230, 88, 200, 130, 130, 70, 136, 66, 160, 200, 130, 150, 116, 70, 152];
         for (int i = 0; i < OperationsLayout.FirstProtocolColumn; i++)
         {
             int c = i;

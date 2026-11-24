@@ -21,12 +21,13 @@ What is going on in this project: what the program does, what was decided and by
 | | |
 |---|---|
 | **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`), **1.1.1** (tag `v1.1.1`, commit `b41f29c`) and **1.2.0** (tag `v1.2.0`, the code is commit `c5c09ab`) – currency, exchange rates, a database, clients. 1.0.0 was only ever a program on the owner's computer |
+| **Made, not released** | **1.2.1** – amounts in another currency are written with it |
 | **Modules** | Покупки, Продажби, Чуждестранни – exports of AI Accounting → `.xls` for Делта Pro, everything in euro |
-| **Tests** | 600, green on the computer and on GitHub |
-| **With the accountant** | `Deal_Type.md`: 71 rows with a box to tick, 27 questions. Nothing has come back yet; В5, В17, В20, В23 and В27 carry the owner's decision |
+| **Tests** | 617, green on the computer |
+| **With the accountant** | `Deal_Type.md`: 73 rows with a box to tick, 29 questions. Nothing has come back yet; В5, В17, В20, В23 and В27 carry the owner's decision |
 | **Never done yet** | **importing a written file into Делта Pro** |
-| **Update in the program** | seen working on the owner's computer: their copy of 1.1.0 is 1.1.1 since 16:12 on 2026-11-23, with 1.1.0 kept |
-| **Next** | the owner's test of 1.2.0 and of the update to it; the import test; then §7 |
+| **Update in the program** | seen working on the owner's computer: their copy of 1.1.0 became 1.1.1 at 16:12 and 1.2.0 at 17:15 on 2026-11-23, the last one the very file that was published |
+| **Next** | the word to release 1.2.1; the import test – above all a document in another currency; then §7 |
 
 ---
 
@@ -38,11 +39,11 @@ It is a spin-off. The mapping to Делта Pro comes from the owner, who is not
 
 | Project | What it is | Size |
 |---|---|---|
-| `src/MicroinvestConvert.Core` | reading, rules, checks, writing, exchange rates | 36 files, 5 300 lines |
+| `src/MicroinvestConvert.Core` | reading, rules, checks, writing, exchange rates | 37 files, 5 400 lines |
 | `src/MicroinvestConvert.Data` | the database | 4 files, 450 lines |
 | `src/MicroinvestConvert.App` | the windows and the update | 31 files, 6 400 lines |
 | `tools/MicroinvestConvert.Cli` | `miconvert <file> --rows --issues` for comparing two versions; `miconvert rates` | 1 file |
-| `tests/MicroinvestConvert.Tests` | 600 tests, all with invented data | 19 files, 6 500 lines |
+| `tests/MicroinvestConvert.Tests` | 617 tests, all with invented data | 19 files, 6 700 lines |
 
 .NET 9, WinForms, xUnit; ExcelDataReader reads, NPOI writes the old `.xls`, SQLite (Microsoft.Data.Sqlite) keeps the rates and the clients.
 
@@ -81,7 +82,7 @@ It is a spin-off. The mapping to Делта Pro comes from the owner, who is not
 | Paid in cash | second row РКО, N = 1 | second row ПКО, N = 1 | second row РКО, N = 1 |
 | Protocol (Q–AA) | empty | empty | empty |
 
-Every rule has a number in `Deal_Type.md` (П1–П17, Ч1–Ч8, Вл1–Вл10, ПР1–ПР13), with where it comes from.
+Every rule has a number in `Deal_Type.md` (П1–П17, Ч1–Ч8, Вл1–Вл12, ПР1–ПР13), with where it comes from.
 
 ### 3.3 Accounts, dates, amounts
 
@@ -89,7 +90,7 @@ Every rule has a number in `Deal_Type.md` (П1–П17, Ч1–Ч8, Вл1–Вл10
 - **Accounting date (C)** is the first day of the tax period, but never before the document; a document from a month after its period is an error. With „Сч. дата = дата на документа“ it is the document date. **P = C.**
 - **Cents.** Every amount is rounded on its own. First the VAT amounts of a deal type add up to what they are as one amount, then the bases take the rest, so the document always adds up to its total (`RoundSegments`).
 - **Everything is in euro** (since 1.2.0), whatever the date. An amount in another currency is **divided** by the units for one euro on the date of the document – or on another day, or by a typed rate; leva by 1.95583. Amounts are added up in their currency first and divided once. Foreign invoices keep the euro of AI until another date or rate is chosen, and are compared with the official rate. [`Currency.md`](Currency.md)
-- **Currency accounts.** An account that is a currency one in Делта Pro is marked with its currency in „Проверки → Сметки“; then its amounts carry it as in `Model.xls`: `euro (currency|rate|fixing)`. None is marked by default, so everything is plain euro.
+- **The currency in column A** (since 1.2.1). Every amount of a document in another currency carries it as in `Model.xls`: `euro (currency|rate|fixing)`, the payment row too. The sample multiplies, so the rates are euro for one unit – with as many digits as give the amount back to the cent. Leva and documents in several currencies are in euro only; so is everything with the setting, or an account marked with EUR in „Проверки → Сметки“. An account marked with a currency takes only documents in it.
 
 ### 3.4 When a document is not written
 
@@ -108,7 +109,7 @@ A missing number, date, type or account; an account that cannot be written; cash
 
 A setting changed in one window is in force in all open ones. Corrections live only in memory until the file is written; leaving them behind is asked about.
 
-### 3.6 The checks (49 in 1.2.0)
+### 3.6 The checks (49 since 1.2.0)
 
 An **error** holds the document back and cannot be switched off. A **warning** can be ticked off as seen – until what it says changes – or switched off for good. An **info** only tells. П = Покупки, Пр = Продажби, Ч = Чуждестранни. A new check is a code in `IssueCode`, an entry in `CheckCatalog` and the place in the rules that raises it; the window lists it by itself. A new page is a class in `App/Forms/Checks` and a line in `CheckPages`.
 
@@ -178,7 +179,8 @@ An **error** holds the document back and cannot be switched off. A **warning** c
 | Checks that are off; accounts under another number | none | 1.1.0; 1.0.0 |
 | **Starting date of the exchange rates** | **empty = nothing is downloaded** | 1.2.0, in the database |
 | Exchange rates by themselves at the start | on (with an empty date it does nothing) | 1.2.0, in the database |
-| Currency accounts | none | 1.2.0 |
+| **Документ във валута (A)** | **with its currency**: `евро (валута\|курс\|фиксинг)` | **1.2.1** – before: only on marked accounts |
+| Accounts marked with a currency, or with EUR | none | 1.2.0; EUR for everybody too since 1.2.1 |
 | Look for a new version at the start; open the file after writing | on | 1.0.0 |
 
 Settings written by 1.0.0 move to the two new defaults when they still hold the old ones (`SettingsFile.Version` 1 → 2).
@@ -232,6 +234,7 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
 | A column with the date of the rate: another date brings its rate by itself | `WorkView.Documents` |
 | The days there are rates for, on the start window | `MainForm` |
 | A database beside the program; a client is made freely, without an ЕИК | `MicroinvestConvert.Data`, `ClientsForm` |
+| **Amounts in another currency are written with it**, as the footnote of `Model.xls` says. 1.2.0 did it only for marked accounts; that was rejected the same day | `CurrencyNotation`, Вл10, since 1.2.1 |
 
 **Assumed here, waiting for an accountant** (the number is the question or the rule in `Deal_Type.md`):
 
@@ -248,11 +251,25 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
 | Differences up to 0.05 a document and 0.01 a row are cents, not another rate | П8 |
 | The rate is of the date of the document; on weekends and holidays the last one published | В25, Вл4 |
 | A credit note is converted by the rate of its own date | В26 |
-| The rate of a currency account is euro for one unit | В24 |
+| The rate in column A is euro for one unit, because the sample multiplies | В24, Вл11 |
+| Several amounts in a currency carry it each, with `;` – `::` is only for material accounts | В29 |
 
 ---
 
 ## 5. Log
+
+### 2026-11-23 (7) — 1.2.1: amounts in another currency are written with it
+
+- **Asked:** the sums in column A of a document in another currency do not follow the footnote of `Model.xls` – `лв (валута|курс|фиксинг)`, for example `2000 (1000|2.00|1.95583)`.
+- **Why it was so:** 1.2.0 could write it, but only for accounts marked as currency ones, and none is marked by default – an assumption of ours, and a wrong one.
+- **Looked up:** the sample itself (rows 4, 5 and 20 multiply; row 4 has `304`, which is not a material account in its chart – so `::` is not needed against an ordinary account); the list of changes of Делта Pro: currency accounts in the import since 1.01.040, details in debit and credit – the `::` – since 1.01.083, nothing about rates in the version for the euro (1.01.087).
+- **Built:** `CurrencyNotation`; `CurrencyRules.WrittenWith` (the account of the partner takes the currency of the document; a mark is an exception); a setting; „Във валута“ in how a document will be posted.
+- **Found and fixed on the way:**
+  - six fixed decimals were too few for large amounts and for currencies of small value → as many as give the amount back to the cent, at least five;
+  - the euro of a foreign invoice are rounded, so the rate that comes out of them is never quite the official one – two different numbers would look like a difference of rates to Делта Pro → when they are by the official rate, the rate and the fixing are the same;
+  - a document in several currencies had a currency on some of its amounts and not on others → in euro only, and it is said.
+- **Verified:** §6.
+- **Not released.**
 
 ### 2026-11-23 (6) — 1.2.0: currency, exchange rates, a database, clients
 
@@ -335,13 +352,14 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
 | Accounts | every account of column B against the source | 1.1: 495 documents and 35 cash rows, 0 wrong. 1.2.0: 773 and 43, 0 wrong |
 | Foreign export | all 27 cells of every row recomputed | 16 of 16; of two more exports 24 of 28 the same, the other 4 differ only in E (§7) |
 | **Exchange rates** | every number against the workbooks of the owner's script: 2026, 2025, parts of 2000, 2008 and 2009 | 22 024 numbers, 0 different |
-| **Documents in another currency** | recomputed from the source with the rates of those workbooks – neither the code nor the database of the program | 49 in 7 exports: 9 by the official rate, 29 with the euro of the file, 10 in leva, 1 held back for its period; 0 different |
+| **Documents in another currency** | recomputed from the source with the rates of those workbooks – neither the code nor the database of the program | 49 in 7 exports: 9 by the official rate, 29 with the euro of the file, 10 in leva, 1 held back for its period; 0 different. In 1.2.1 also what is in the brackets: 36 rows, 6 of them payments, 0 different |
 | **Nothing else changed in 1.2.0** | the rows of 21 exports before and after | 18 the same; 3 differ, as they should: 4 and 5 documents that waited for a rate are written, one export in leva is in euro |
+| **Nothing else changed in 1.2.1** | 2 977 rows of all exports against 1.2.0, cell by cell | with „Само в евро“ 0 different; with the currency 63 cells, all in column A and only by the brackets |
 | **The real program** | one `.exe`, without a date, with 01.01.2026, with no internet, with the site gone; started together with an export that has documents in pounds | the database is made beside it; 326 days in 6 seconds; nothing is said by itself; the documents become ready by themselves, then the rest of the days come |
 | Nothing else changed in 1.1.0 | the new engine with the two old settings against the output of 1.0.0, cell by cell | 882 rows, 0 different |
 | Layout and lists | against the vendor's `Model.xls` | 27 columns, 39 document types, 18 deal types, 4 VIES values the same |
 | `Deal_Type.md` says what the program does | its tables and examples are read by tests | green |
-| Windows | 77 tests operate them; the real program with three files: 4 windows, 1 button on the taskbar, minimised and back whole, questions appear, exit code 0 | fine |
+| Windows | 79 tests operate them; the real program with three files: 4 windows, 1 button on the taskbar, minimised and back whole, questions appear, exit code 0 | fine |
 | Update | two real programs, forward and back; from GitHub 1.0.0 → 1.1.0 and 1.1.0 → 1.1.1 | identical to the published programs |
 | The public repository | names and numbers of all samples against its whole history, amounts against its files | §5 (5) |
 
@@ -366,9 +384,10 @@ To check again after a change of the engine: `dotnet test`, then the scripts in 
 4. В20 – which values make the protocol (Q–AA), if it is to be written?
 5. В21 – are several partners with 999999999999999 kept apart?
 6. В5 – is 3 right for a Bulgarian supplier outside the VAT ledger?
-7. В24–В26 – the rate of a currency account, the date of the rate, the rate of a credit note.
+7. В24–В26 – the rate in column A, the date of the rate, the rate of a credit note.
+8. В28 – which accounts documents in another currency are on: in Делта Pro a currency account is in one currency only. В29 – several amounts in a currency.
 
-**For the owner:** the import into Делта Pro; the test of 1.2.0; what else „Проверки“ should check.
+**For the owner:** the import into Делта Pro, above all of a document in another currency; whether to release 1.2.1; what else „Проверки“ should check.
 
 **Found in new real files, not changed** (the rules are not clear, or it is no part of what was asked):
 

@@ -29,8 +29,9 @@ public class DealTypeDocumentTests
         throw new FileNotFoundException("Deal_Type.md");
     }
 
+    // A bar inside a cell is written as \|.
     private static string[] Cells(string line) =>
-        line.Trim().Trim('|').Split('|').Select(c => c.Trim().Replace("**", "")).ToArray();
+        Regex.Split(line.Trim().Trim('|'), @"(?<!\\)\|").Select(c => c.Trim().Replace("**", "").Replace(@"\|", "|")).ToArray();
 
     private static string[] Row(string id) => Cells(Lines.Single(l => l.StartsWith($"| {id} |", StringComparison.Ordinal)));
 
@@ -141,16 +142,20 @@ public class DealTypeDocumentTests
     }
 
     [Theory]
-    [InlineData("| покупка за 1 000,00 + 20% USD, 1 EUR = 1,25 USD |", "401", "")]
-    [InlineData("| същата по валутна сметка 401/2 (USD) |", "401/2", "USD")]
-    public void The_examples_of_currency_come_out_as_written(string start, string supplier, string accountCurrency)
+    [InlineData("| покупка за 1 000,00 + 20% USD, 1 EUR = 1,25 USD |", "USD", 0, "", "")]
+    [InlineData("| плащането ѝ в брой |", "USD", 1, "", "")]
+    [InlineData("| същата, сметка 401 отбелязана с EUR |", "USD", 0, "EUR", "")]
+    [InlineData("| същата, въведен курс 1,28 |", "USD", 0, "", "1,28")]
+    [InlineData("| покупка за 1 000,00 + 20% BGN |", "BGN", 0, "", "")]
+    public void The_examples_of_currency_come_out_as_written(string start, string currency, int row, string mark, string typed)
     {
         var settings = new ConverterSettings();
-        if (accountCurrency.Length > 0) settings.AccountCurrencies[supplier] = accountCurrency;
+        if (mark.Length > 0) settings.AccountCurrencies["401"] = mark;
         var options = new ConverterOptions(settings);
-        var batch = new TestSheet(Layout.Purchases).Purchase(1d, "1", 1000, 200, ("T", "USD"), ("AI", supplier)).Read();
+        var batch = new TestSheet(Layout.Purchases).Purchase(1d, "1", 1000, 200, ("T", currency), ("AH", "В брой"), ("AJ", "501")).Read();
+        if (typed.Length > 0) Assert.True(batch.Documents[0].TrySet(DocField.Rate, typed, out _));
         new DocumentProcessor(options, new SomeRates().Add("USD", "10.06.2026", 1.25m)).Process(batch);
-        string[] cells = OperationRows.Build(batch, options)[0].Cells;
+        string[] cells = OperationRows.Build(batch, options)[row].Cells;
 
         string line = Lines.Single(l => l.StartsWith(start, StringComparison.Ordinal));
         Assert.Equal(Regex.Matches(line, "`([^`]*)`").Select(m => m.Groups[1].Value.Replace(@"\|", "|")),

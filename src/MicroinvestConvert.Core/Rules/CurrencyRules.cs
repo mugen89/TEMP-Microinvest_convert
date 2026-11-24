@@ -1,6 +1,7 @@
 using MicroinvestConvert.Core.Exchange;
 using MicroinvestConvert.Core.Model;
 using MicroinvestConvert.Core.Nomenclature;
+using MicroinvestConvert.Core.Settings;
 using static MicroinvestConvert.Core.Rules.RuleText;
 
 namespace MicroinvestConvert.Core.Rules;
@@ -13,7 +14,7 @@ namespace MicroinvestConvert.Core.Rules;
 internal static class CurrencyRules
 {
     /// <summary>How far an amount of the file may be from the official rate – its rounding.</summary>
-    private const decimal FileTolerance = 0.02m;
+    internal const decimal FileTolerance = 0.02m;
 
     /// <summary>How far a typed rate may be from the official one, as a part of it.</summary>
     private const decimal TypedTolerance = 0.05m;
@@ -115,7 +116,8 @@ internal static class CurrencyRules
         return (allBase, allVat);
     }
 
-    private static bool HasOwnEuro(OperationDocument doc, LedgerLine line) =>
+    /// <summary>The euro of the row are from the file, or typed over it – not by the rate of the document.</summary>
+    internal static bool HasOwnEuro(OperationDocument doc, LedgerLine line) =>
         line.Euro != null && doc.ConversionOf(line) is { } conversion && (conversion.Origin == RateOrigin.File || line.IsEdited(LineField.Euro));
 
     /// <summary>The whole amount of some rows in euro, without the noise of the division.</summary>
@@ -180,18 +182,40 @@ internal static class CurrencyRules
     private static bool IsByRate(LedgerLine line, decimal rate) =>
         Math.Abs(line.Euro!.Value - DocumentProcessor.Cents(line.Gross / rate)) <= FileTolerance;
 
+    // ----- with their currency in column A -----
+
     /// <summary>
-    /// The accounts of Делта Pro that are kept in a currency, against the currency of the document:
-    /// such an account takes its amounts in its own currency only.
+    /// The currency the amounts on an account are written with, beside the euro; empty = euro only.
+    /// The account of the partner takes the currency of the document, any other one only when it is
+    /// marked with it. An account is kept in one currency, so a document in several has none, and
+    /// the lev, whose rate is fixed, is only another way to say euro.
     /// </summary>
-    public static void CheckAccounts(OperationDocument doc, IEnumerable<(string Account, string Currency)> accounts)
+    /// <param name="doc">The document.</param>
+    /// <param name="mark">What the account is marked with; the euro = an ordinary account, empty = nothing.</param>
+    /// <param name="isPartner">It is the account of the supplier or of the customer.</param>
+    /// <param name="options">The settings in force.</param>
+    public static string WrittenWith(OperationDocument doc, string mark, bool isPartner, ConverterOptions options)
     {
-        foreach (var (account, currency) in accounts.Where(a => a.Currency.Length > 0).Distinct())
-        {
-            if (doc.Lines.TrueForAll(l => doc.CurrencyOf(l) == currency)) continue;
-            string own = string.Join(", ", doc.Lines.Select(doc.CurrencyOf).Distinct());
+        string currency = doc.OnlyCurrency;
+        bool with = mark.Length > 0
+            ? mark == currency
+            : isPartner && currency != Currencies.Lev && options.General.CurrencyAmounts == CurrencyAmounts.WithCurrency;
+        return with ? currency : "";
+    }
+
+    /// <summary>What has to be written in euro only, although one would expect its currency too.</summary>
+    public static void CheckAccounts(OperationDocument doc, ConverterOptions options, IEnumerable<(string Account, string Mark)> accounts)
+    {
+        var own = doc.Lines.Select(doc.CurrencyOf).Distinct().ToList();
+        if (own.Count > 1 && own.Exists(c => c is not (Currencies.Euro or Currencies.Lev)) && options.General.CurrencyAmounts == CurrencyAmounts.WithCurrency)
             doc.Issues.Add(new Issue(IssueCode.AccountCurrency,
-                $"Сметка {account} е във валута {currency}, а документът е в {own} – сумата по нея се записва само в евро."));
+                $"Документът е в няколко валути ({string.Join(", ", own)}), а сметка се води само в една – сумите се записват само в евро."));
+
+        foreach (var (account, mark) in accounts.Where(a => a.Mark.Length > 0 && a.Mark != Currencies.Euro).Distinct())
+        {
+            if (own.TrueForAll(c => c == mark)) continue;
+            doc.Issues.Add(new Issue(IssueCode.AccountCurrency,
+                $"Сметка {account} е във валута {mark}, а документът е в {string.Join(", ", own)} – сумата по нея се записва само в евро."));
         }
     }
 }

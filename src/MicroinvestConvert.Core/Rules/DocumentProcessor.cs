@@ -167,12 +167,21 @@ public sealed class DocumentProcessor
             CheckAccount(doc, account, IssueCode.MissingAccount, $"{what} на ред {rows}");
         }
 
-        doc.CounterCurrency = Options.AccountCurrency(doc.CounterAccount, "");
-        doc.CashCurrency = cashRow ? Options.AccountCurrency(cash, "") : "";
-        CurrencyRules.CheckAccounts(doc, doc.Lines
+        string partnerMark = Options.AccountCurrency(doc.CounterAccount, ""), cashMark = cashRow ? Options.AccountCurrency(cash, "") : "";
+        doc.CounterCurrency = CurrencyRules.WrittenWith(doc, partnerMark, isPartner: true, Options);
+        doc.CashCurrency = CurrencyRules.WrittenWith(doc, cashMark, isPartner: false, Options);
+        CurrencyRules.CheckAccounts(doc, Options, doc.Lines
             .Select(l => (AccountCodes.Format(l.Account, l.Analytic, Options), Options.AccountCurrency(l.Account, l.Analytic)))
-            .Append((doc.CounterAccountOut, doc.CounterCurrency))
-            .Append((doc.CashAccountOut, doc.CashCurrency)));
+            .Append((doc.CounterAccountOut, partnerMark))
+            .Append((doc.CashAccountOut, cashMark)));
+    }
+
+    // An amount is on two accounts: the one of the partner decides, then its own. VAT has no currency of its own.
+    private string CurrencyOfSegment(OperationDocument doc, bool isVat, List<LedgerLine> lines)
+    {
+        if (doc.CounterCurrency.Length > 0 || isVat) return doc.CounterCurrency;
+        var own = lines.Select(l => CurrencyRules.WrittenWith(doc, Options.AccountCurrency(l.Account, l.Analytic), isPartner: false, Options)).Distinct().ToList();
+        return own.Count == 1 ? own[0] : "";
     }
 
     private static void CheckAccount(OperationDocument doc, string account, IssueCode missing, string what)
@@ -240,7 +249,7 @@ public sealed class DocumentProcessor
             foreach (var account in Ordered(doc, deal, l => AccountCodes.Format(l.Account, l.Analytic, Options)))
             {
                 var lines = account.ToList();
-                segments.Add(NewSegment(account.Key, NameOf(lines), false, deal.Key, lines,
+                segments.Add(NewSegment(doc, account.Key, NameOf(lines), false, deal.Key, lines,
                     sign * EuroOf(doc, lines).Base, InCurrency(doc, lines, l => sign * AmountsOf(doc, l).Base)));
 
                 if (Options.General.VatLines == VatLines.PerAccount)
@@ -281,7 +290,7 @@ public sealed class DocumentProcessor
             DealTypes.PurchaseFullCredit or DealTypes.PurchasePartialCredit or DealTypes.Sale20 or DealTypes.Sale9;
 
         if (vat != 0m || zeroDocument)
-            segments.Add(NewSegment(account, "ДДС", true, deal, lines, sign * vat, InCurrency(doc, lines, l => sign * AmountsOf(doc, l).Vat)));
+            segments.Add(NewSegment(doc, account, "ДДС", true, deal, lines, sign * vat, InCurrency(doc, lines, l => sign * AmountsOf(doc, l).Vat)));
     }
 
     // Only amounts of one and the same currency have a sum in it.
@@ -290,7 +299,8 @@ public sealed class DocumentProcessor
             ? Cents(lines.Sum(amount))
             : null;
 
-    private static EntrySegment NewSegment(string account, string name, bool isVat, int deal, List<LedgerLine> lines, decimal raw, decimal? inCurrency) => new()
+    private EntrySegment NewSegment(OperationDocument doc, string account, string name, bool isVat, int deal, List<LedgerLine> lines,
+        decimal raw, decimal? inCurrency) => new()
     {
         Account = account,
         AccountName = name,
@@ -301,6 +311,7 @@ public sealed class DocumentProcessor
         Raw = raw,
         Amount = Cents(raw),
         InCurrency = inCurrency,
+        Currency = CurrencyOfSegment(doc, isVat, lines),
     };
 
     private static string NameOf(List<LedgerLine> lines) =>

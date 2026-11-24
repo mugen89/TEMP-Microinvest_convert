@@ -21,7 +21,7 @@ public class ForeignTests
     public void An_invoice_is_one_row_in_euro_with_deal_type_1_and_no_protocol()
     {
         string[] cells = Cells(Sheet.Invoice(1d, "INV-0001", 100, "USD", 86.27m));
-        Assert.Equal(("86.27", "602/1-4011", "1", ""), (cells[0], cells[1], cells[OperationsLayout.DealType], cells[OperationsLayout.Vies]));
+        Assert.Equal(("86.27 (100|0.8627|0.8627)", "602/1-4011", "1", ""), (cells[0], cells[1], cells[OperationsLayout.DealType], cells[OperationsLayout.Vies]));
         Assert.Equal(("2026-09-10", "Example Software Inc.", "INV-0001", "Ф-ра", "Разход за външни услуги"), (cells[2], cells[3], cells[7], cells[8], cells[10]));
         Assert.Equal("2026-09-10", cells[OperationsLayout.ExportMonth]);
         Assert.All(cells[OperationsLayout.FirstProtocolColumn..], c => Assert.Equal("", c));
