@@ -20,14 +20,13 @@ What is going on in this project: what the program does, what was decided and by
 
 | | |
 |---|---|
-| **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`), **1.1.1** (tag `v1.1.1`, commit `b41f29c`), **1.2.0** (tag `v1.2.0`, the code is commit `c5c09ab`) – currency, exchange rates, a database, clients – and **1.2.1** (tag `v1.2.1`, the code is commit `150d098`) – amounts in another currency are written with it. 1.0.0 was only ever a program on the owner's computer |
+| **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`), **1.1.1** (tag `v1.1.1`, commit `b41f29c`), **1.2.0** (tag `v1.2.0`, the code is commit `c5c09ab`) – currency, exchange rates, a database, clients, **1.2.1** (tag `v1.2.1`, the code is commit `150d098`) – amounts in another currency are written with it – and **1.2.2** (tag `v1.2.2`, the code is commit `bc0b98a`) – the rates of a currency and their export. 1.0.0 was only ever a program on the owner's computer |
 | **Modules** | Покупки, Продажби, Чуждестранни – exports of AI Accounting → `.xls` for Делта Pro, everything in euro |
-| **Made, not released** | **1.2.2** – what „Валутни курсове“ shows, and its export |
-| **Tests** | 639, green on the computer |
+| **Tests** | 639, green on the computer and on GitHub |
 | **With the accountant** | `Deal_Type.md`: 73 rows with a box to tick, 29 questions. Nothing has come back yet; В5, В17, В20, В23 and В27 carry the owner's decision |
 | **Never done yet** | **importing a written file into Делта Pro** |
 | **Update in the program** | seen working on the owner's computer: their copy of 1.1.0 became 1.1.1 at 16:12 and 1.2.0 at 17:15 on 2026-11-23, the last one the very file that was published |
-| **Next** | the word to release 1.2.2; an accountant tests the program; the import test – above all a document in another currency; then §7 |
+| **Next** | an accountant tests the program; the import test – above all a document in another currency; then §7 |
 
 ---
 
@@ -264,7 +263,7 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
 - **Built:** `RateView` and `RateCalendar.PeriodOf`; `RatesWorkbook` (`.xlsx`, dates and numbers); the choice in `RatesForm`; the window in the header of the start window – until now there was only a button without a border at the bottom, which did not look like one.
 - **Decided here:** the end of a period is the last day of the chosen currency, not of all; how many days of it there are is said when not all; weekends are shown with the day their rate is from; the export is in the order of the screen, and opens when „Отвори след запис“ is on – no message.
 - **Verified:** the workbook opened in Excel itself; §6.
-- **Not released.**
+- **Published:** tag `v1.2.2`, with the owner's permission. The code was pushed first, and the tag was set when it was green on GitHub (`bc0b98a`).
 
 ### 2026-11-23 (7) — 1.2.1: amounts in another currency are written with it
 
