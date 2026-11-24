@@ -16,18 +16,17 @@ What is going on in this project: what the program does, what was decided and by
 
 ---
 
-## 1. Where things stand (2026-11-23)
+## 1. Where things stand (2026-11-24)
 
 | | |
 |---|---|
-| **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`), **1.1.1** (tag `v1.1.1`, commit `b41f29c`) and **1.2.0** (tag `v1.2.0`, the code is commit `c5c09ab`) – currency, exchange rates, a database, clients. 1.0.0 was only ever a program on the owner's computer |
-| **Made, not released** | **1.2.1** – amounts in another currency are written with it |
+| **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`), **1.1.1** (tag `v1.1.1`, commit `b41f29c`), **1.2.0** (tag `v1.2.0`, the code is commit `c5c09ab`) – currency, exchange rates, a database, clients – and **1.2.1** (tag `v1.2.1`, the code is commit `150d098`) – amounts in another currency are written with it. 1.0.0 was only ever a program on the owner's computer |
 | **Modules** | Покупки, Продажби, Чуждестранни – exports of AI Accounting → `.xls` for Делта Pro, everything in euro |
-| **Tests** | 617, green on the computer |
+| **Tests** | 617, green on the computer and on GitHub |
 | **With the accountant** | `Deal_Type.md`: 73 rows with a box to tick, 29 questions. Nothing has come back yet; В5, В17, В20, В23 and В27 carry the owner's decision |
 | **Never done yet** | **importing a written file into Делта Pro** |
 | **Update in the program** | seen working on the owner's computer: their copy of 1.1.0 became 1.1.1 at 16:12 and 1.2.0 at 17:15 on 2026-11-23, the last one the very file that was published |
-| **Next** | the word to release 1.2.1; the import test – above all a document in another currency; then §7 |
+| **Next** | the import test – above all a document in another currency; then §7 |
 
 ---
 
@@ -269,7 +268,7 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
   - the euro of a foreign invoice are rounded, so the rate that comes out of them is never quite the official one – two different numbers would look like a difference of rates to Делта Pro → when they are by the official rate, the rate and the fixing are the same;
   - a document in several currencies had a currency on some of its amounts and not on others → in euro only, and it is said.
 - **Verified:** §6.
-- **Not released.**
+- **Published:** tag `v1.2.1` on 2026-11-24, with the owner's permission. The code was pushed first, and the tag was set when it was green on GitHub (`150d098`).
 
 ### 2026-11-23 (6) — 1.2.0: currency, exchange rates, a database, clients
 
@@ -387,7 +386,7 @@ To check again after a change of the engine: `dotnet test`, then the scripts in 
 7. В24–В26 – the rate in column A, the date of the rate, the rate of a credit note.
 8. В28 – which accounts documents in another currency are on: in Делта Pro a currency account is in one currency only. В29 – several amounts in a currency.
 
-**For the owner:** the import into Делта Pro, above all of a document in another currency; whether to release 1.2.1; what else „Проверки“ should check.
+**For the owner:** the import into Делта Pro, above all of a document in another currency; what else „Проверки“ should check.
 
 **Found in new real files, not changed** (the rules are not clear, or it is no part of what was asked):
 
