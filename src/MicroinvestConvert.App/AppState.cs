@@ -26,6 +26,9 @@ internal sealed class AppState : IDisposable
     public ClientBook Clients { get; }
     public RatesService Rates { get; }
 
+    /// <summary>What „Валутни курсове" showed last, for the next time it is opened.</summary>
+    public (RateView View, string Currency) RatesShown { get; set; } = (RateView.Day, "USD");
+
     /// <summary>The settings were changed in some window: every open file is calculated again.</summary>
     public event Action? SettingsChanged;
 

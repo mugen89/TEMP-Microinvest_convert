@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -26,6 +27,34 @@ internal static class ExcelFiles
             Filter = "Excel (*.xlsx; *.xls; *.xlsm)|*.xlsx;*.xls;*.xlsm|Всички файлове|*.*",
         };
         return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.FileName : null;
+    }
+
+    /// <summary>In tests: what is answered instead of asking – the suggested name → the path. Per thread, because tests run side by side.</summary>
+    [ThreadStatic]
+    internal static Func<string, string?>? PickToSaveInstead;
+
+    /// <summary>Asks where a workbook goes; null = nowhere.</summary>
+    public static string? PickToSave(IWin32Window? owner, string title, string name)
+    {
+        if (PickToSaveInstead is { } instead) return instead(name);
+        using var dialog = new SaveFileDialog
+        {
+            Title = title, Filter = "Excel (*.xlsx)|*.xlsx", DefaultExt = "xlsx", AddExtension = true, FileName = name,
+        };
+        return dialog.ShowDialog(owner) == DialogResult.OK ? dialog.FileName : null;
+    }
+
+    /// <summary>Opens a written file with the program it belongs to.</summary>
+    public static void Open(IWin32Window? owner, string path)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            Dialogs.Warning(owner, "Файлът е записан, но не можа да бъде отворен", ex.Message);
+        }
     }
 
     /// <summary>

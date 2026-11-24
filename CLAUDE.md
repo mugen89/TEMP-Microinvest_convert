@@ -95,7 +95,7 @@ found in them, the scripts that check them) goes to `private/`, which git ignore
 | `Core/Model` | `OperationBatch` → `OperationDocument` → `LedgerLine` (one amount in one `LedgerBucket`, in the currency of its row); edits go through `TrySet` |
 | `Core/Exchange` | exchange rates: the page, the source, which days to ask for, one download (`docs/Currency.md`) |
 | `Core/Rules` | `DocumentProcessor` (run again after every edit), `PurchaseRules`, `SaleRules`, `ForeignRules`, `VatRates`, `VatCorrections`, accounts, dates, partners |
-| `Core/Output` | `OperationRows` (the texts of A..AA), `DeltaWorkbook` (write + read back and compare) |
+| `Core/Output` | `OperationRows` (the texts of A..AA), `CurrencyNotation` (an amount with its currency), `DeltaWorkbook` (write + read back and compare), `RatesWorkbook` (exported rates, `.xlsx`) |
 | `Core/Settings` | general settings (JSON store), clients (`ClientBook`) |
 | `Data` | the database: `Database` (schema), `RateStore`, `ClientStore`, `SettingStore` |
 | `Core/Checks` | `CheckCatalog`: every check, its meaning, severity and the fields that answer it |

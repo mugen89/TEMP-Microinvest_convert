@@ -22,11 +22,12 @@ What is going on in this project: what the program does, what was decided and by
 |---|---|
 | **Published** | **1.1.0** (tag `v1.1.0`, commit `3799606`), **1.1.1** (tag `v1.1.1`, commit `b41f29c`), **1.2.0** (tag `v1.2.0`, the code is commit `c5c09ab`) – currency, exchange rates, a database, clients – and **1.2.1** (tag `v1.2.1`, the code is commit `150d098`) – amounts in another currency are written with it. 1.0.0 was only ever a program on the owner's computer |
 | **Modules** | Покупки, Продажби, Чуждестранни – exports of AI Accounting → `.xls` for Делта Pro, everything in euro |
-| **Tests** | 617, green on the computer and on GitHub |
+| **Made, not released** | **1.2.2** – what „Валутни курсове“ shows, and its export |
+| **Tests** | 639, green on the computer |
 | **With the accountant** | `Deal_Type.md`: 73 rows with a box to tick, 29 questions. Nothing has come back yet; В5, В17, В20, В23 and В27 carry the owner's decision |
 | **Never done yet** | **importing a written file into Делта Pro** |
 | **Update in the program** | seen working on the owner's computer: their copy of 1.1.0 became 1.1.1 at 16:12 and 1.2.0 at 17:15 on 2026-11-23, the last one the very file that was published |
-| **Next** | the import test – above all a document in another currency; then §7 |
+| **Next** | the word to release 1.2.2; an accountant tests the program; the import test – above all a document in another currency; then §7 |
 
 ---
 
@@ -38,11 +39,11 @@ It is a spin-off. The mapping to Делта Pro comes from the owner, who is not
 
 | Project | What it is | Size |
 |---|---|---|
-| `src/MicroinvestConvert.Core` | reading, rules, checks, writing, exchange rates | 37 files, 5 400 lines |
+| `src/MicroinvestConvert.Core` | reading, rules, checks, writing, exchange rates | 39 files, 5 500 lines |
 | `src/MicroinvestConvert.Data` | the database | 4 files, 450 lines |
-| `src/MicroinvestConvert.App` | the windows and the update | 31 files, 6 400 lines |
+| `src/MicroinvestConvert.App` | the windows and the update | 31 files, 6 500 lines |
 | `tools/MicroinvestConvert.Cli` | `miconvert <file> --rows --issues` for comparing two versions; `miconvert rates` | 1 file |
-| `tests/MicroinvestConvert.Tests` | 617 tests, all with invented data | 19 files, 6 700 lines |
+| `tests/MicroinvestConvert.Tests` | 639 tests, all with invented data | 19 files, 7 000 lines |
 
 .NET 9, WinForms, xUnit; ExcelDataReader reads, NPOI writes the old `.xls`, SQLite (Microsoft.Data.Sqlite) keeps the rates and the clients.
 
@@ -99,10 +100,10 @@ A missing number, date, type or account; an account that cannot be written; cash
 
 | Window | What it is for |
 |---|---|
-| Start (`MainForm`) | a card per module with a place to drop the file, the last files, **the days there are exchange rates for**, Видове сделки, Фирми, Настройки, Обновяване. The only window on the taskbar |
+| Start (`MainForm`) | a card per module with a place to drop the file, the last files, **the days there are exchange rates for**, Видове сделки, Фирми, Валутни курсове, Настройки, Обновяване. The only window on the taskbar |
 | Module (`ModuleForm` + `WorkView`) | one per module, all may be open at once. Documents, the rows of the chosen one, how it will be posted, the exact rows of the file, what was read. „← Начало“ hides it with its file and corrections |
 | Проверки (`ChecksForm`) | beside the module; what is changed in one shows in the other. Pages: Всички проверки · ДДС · Вид сделка · Сметки · Контрагенти (without ДДС for Чуждестранни) |
-| Валутни курсове (`RatesForm`) | the starting date, by itself at the start or with the button, the rates of a day or of a currency |
+| Валутни курсове (`RatesForm`) | the starting date, by itself at the start or with the button; the rates of a day, or of a currency – every day, three months back, three calendar months; export to Excel |
 | Фирми (`ClientsForm`) | the clients in the database; made with a name only |
 | Настройки, Видове сделки, Обновяване, Какво е ново | small windows over the one they were opened from |
 
@@ -257,6 +258,14 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
 
 ## 5. Log
 
+### 2026-11-24 — 1.2.2: what „Валутни курсове“ shows, and its export
+
+- **Asked:** to open the window from the start form; beside the rates of a day also those of a chosen currency, of a chosen currency three months back from the last day there is, and for three calendar months up to it (on 24.11.2026, with rates until the 23rd: from 1 September); to export what is shown, for the accountants to verify.
+- **Built:** `RateView` and `RateCalendar.PeriodOf`; `RatesWorkbook` (`.xlsx`, dates and numbers); the choice in `RatesForm`; the window in the header of the start window – until now there was only a button without a border at the bottom, which did not look like one.
+- **Decided here:** the end of a period is the last day of the chosen currency, not of all; how many days of it there are is said when not all; weekends are shown with the day their rate is from; the export is in the order of the screen, and opens when „Отвори след запис“ is on – no message.
+- **Verified:** the workbook opened in Excel itself; §6.
+- **Not released.**
+
 ### 2026-11-23 (7) — 1.2.1: amounts in another currency are written with it
 
 - **Asked:** the sums in column A of a document in another currency do not follow the footnote of `Model.xls` – `лв (валута|курс|фиксинг)`, for example `2000 (1000|2.00|1.95583)`.
@@ -358,7 +367,7 @@ A pushed tag `vX.Y.Z` makes the release (`.github/workflows/release.yml`): it ha
 | Nothing else changed in 1.1.0 | the new engine with the two old settings against the output of 1.0.0, cell by cell | 882 rows, 0 different |
 | Layout and lists | against the vendor's `Model.xls` | 27 columns, 39 document types, 18 deal types, 4 VIES values the same |
 | `Deal_Type.md` says what the program does | its tables and examples are read by tests | green |
-| Windows | 79 tests operate them; the real program with three files: 4 windows, 1 button on the taskbar, minimised and back whole, questions appear, exit code 0 | fine |
+| Windows | 89 tests operate them; the real program with three files: 4 windows, 1 button on the taskbar, minimised and back whole, questions appear, exit code 0 | fine |
 | Update | two real programs, forward and back; from GitHub 1.0.0 → 1.1.0 and 1.1.0 → 1.1.1 | identical to the published programs |
 | The public repository | names and numbers of all samples against its whole history, amounts against its files | §5 (5) |
 
@@ -415,6 +424,7 @@ To check again after a change of the engine: `dotnet test`, then the scripts in 
 - `UpdateRehearsal` works with the real folder of kept versions – not on a computer whose owner has some there.
 - SQLite begins a transaction in a read-only file without a word; only a write says it cannot be written.
 - What passes here may fail on GitHub's slower machine. To see it here: two processor cores (`ProcessorAffinity = 3`) and a short sleep in `Database.Use` while the connection is open.
+- The window tests need a screen that is not locked: otherwise GDI+ refuses to paint („A generic error occurred in GDI+“), every one waits for its minute and the run never ends. Is `LogonUI` running? Then only those without windows: `--filter "FullyQualifiedName!~WindowTests&FullyQualifiedName!~InteractionTests&FullyQualifiedName!~VisualTests"`. The program itself opens a file on a locked screen without an error (tried).
 - Run the tests with nothing else running: a build or a publish beside them has made window tests wait for 60 seconds.
 - Windows PowerShell 5.1 writes a byte order mark with `-Encoding UTF8`; long scripts go to a file, not into a command line.
 - `dotnet test` on the solution does not rebuild the Release build of the command line tool – build it before comparing outputs.

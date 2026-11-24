@@ -89,6 +89,9 @@ internal sealed class MainForm : AppForm, IHub
         title.Margin = new Padding(3, 3, 3, 3);
         var subtitle = Make.Label("AI Accounting → Microinvest Делта Pro", Theme.Muted);
         subtitle.Margin = new Padding(8, 9, 3, 3);
+        subtitle.AutoSize = false;         // a narrow window cuts it, not the buttons
+        subtitle.AutoEllipsis = true;
+        subtitle.Dock = DockStyle.Fill;
 
         var settings = new FlatButton("Настройки", ButtonLook.Quiet);
         settings.Click += (_, _) => ShowSettings(this, OnlyClient());
@@ -96,13 +99,15 @@ internal sealed class MainForm : AppForm, IHub
         deals.Click += (_, _) => ShowDealTypes(this);
         var clients = new FlatButton("Фирми", ButtonLook.Quiet);
         clients.Click += (_, _) => ShowClients();
+        var rates = new FlatButton("Валутни курсове", ButtonLook.Quiet);
+        rates.Click += (_, _) => ShowRates();
         var update = new FlatButton("Обновяване", ButtonLook.Quiet);
         update.Click += (_, _) => ShowUpdates();
-        foreach (var button in new[] { settings, deals, clients, update }) button.TabStop = false;
+        foreach (var button in new[] { settings, deals, clients, rates, update }) button.TabStop = false;
 
         bar.Controls.Add(title, 0, 0);
         bar.Controls.Add(subtitle, 1, 0);
-        bar.Controls.Add(Make.Flow(deals, clients, settings, update), 2, 0);
+        bar.Controls.Add(Make.Flow(deals, clients, rates, settings, update), 2, 0);
         bar.Paint += (_, e) =>
         {
             using var pen = new Pen(Theme.Border);
@@ -151,8 +156,10 @@ internal sealed class MainForm : AppForm, IHub
     // The days there are exchange rates for. Failures of the download are not shown here.
     private Control BuildRates()
     {
-        _rates.Margin = new Padding(8, 8, 3, 6);
-        var open = new FlatButton("Валутни курсове…", ButtonLook.Quiet) { TabStop = false };
+        _rates.Margin = new Padding(8, 9, 3, 6);
+        _rates.Cursor = Cursors.Hand;
+        _rates.Click += (_, _) => ShowRates();
+        var open = new FlatButton("Валутни курсове…") { TabStop = false, Margin = new Padding(3, 5, 6, 5) };
         open.Click += (_, _) => ShowRates();
 
         var bar = new TableLayoutPanel

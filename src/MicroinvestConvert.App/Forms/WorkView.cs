@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using MicroinvestConvert.App.Forms.Checks;
 using MicroinvestConvert.App.Ui;
 using MicroinvestConvert.Core.Model;
@@ -452,15 +451,7 @@ internal sealed partial class WorkView : AppView, ICheckHost
         if (left > 0) text += $"\n\nНе са записани: {Fmt.Documents(left)} – вижте филтъра „Няма да се запишат“.";
         Dialogs.Info(this, "Файлът е записан", text);
 
-        if (!_openAfter.Checked) return;
-        try
-        {
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true })?.Dispose();
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            Dialogs.Warning(this, "Файлът е записан, но не можа да бъде отворен", ex.Message);
-        }
+        if (_openAfter.Checked) ExcelFiles.Open(this, path);
     }
 
     private void EndEdits()

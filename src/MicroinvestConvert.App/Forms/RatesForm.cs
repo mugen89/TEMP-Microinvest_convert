@@ -1,5 +1,7 @@
 using MicroinvestConvert.App.Ui;
 using MicroinvestConvert.Core.Exchange;
+using MicroinvestConvert.Core.Output;
+using MicroinvestConvert.Core.Source;
 using MicroinvestConvert.Core.Values;
 using MicroinvestConvert.Data;
 
@@ -7,14 +9,19 @@ namespace MicroinvestConvert.App.Forms;
 
 /// <summary>
 /// „Валутни курсове": from which day they are kept, whether they come by themselves, the button
-/// that brings them now, and the rates there are.
+/// that brings them now, and the rates there are – of a day or of a currency, also as a workbook.
 /// </summary>
 internal sealed class RatesForm : AppForm
 {
-    private sealed record Row(DateTime Day, DateTime Published, string Code, string Name, decimal PerEuro);
+    private static readonly (RateView View, string Label)[] Views =
+    [
+        (RateView.Day, "Всички валути за дата"),
+        (RateView.Currency, "Избрана валута – всички дни"),
+        (RateView.ThreeMonths, "Избрана валута – 3 месеца назад"),
+        (RateView.ThreeCalendarMonths, "Избрана валута – 3 календарни месеца"),
+    ];
 
-    private const string AllCurrencies = "всички валути";
-
+    private readonly AppState _app;
     private readonly RatesService _rates;
     private readonly IReadOnlyList<DateTime> _needed;
 
@@ -28,22 +35,29 @@ internal sealed class RatesForm : AppForm
     private readonly Label _last = Make.Label("", Theme.Muted);
     private readonly ProgressBar _progress = new() { Dock = DockStyle.Fill, Height = 8, Margin = new Padding(12, 0, 12, 4), Visible = false };
 
+    private readonly ComboBox _view = Make.Combo(270, [.. Views.Select(v => v.Label)]);
     private readonly TextBox _day = Make.TextBox(96, "дд.мм.гггг");
     private readonly ComboBox _currency = Make.Combo(230);
+    private readonly FlatButton _export = new("Експорт в Excel…");
     private readonly Label _table = Make.Label("", Theme.Muted);
-    private readonly Grid<Row> _grid = new();
+    private readonly Grid<RateLine> _grid = new();
+    private FlowLayoutPanel _dayPart = null!, _currencyPart = null!;
     private IReadOnlyList<(string Code, string Name)> _currencies = [];
     private bool _filling;
+
+    // What is shown, in words: for the workbook and its name.
+    private string _title = "", _period = "", _fileName = "";
 
     /// <param name="app">What the windows share.</param>
     /// <param name="needed">Days that open documents wait for.</param>
     public RatesForm(AppState app, IReadOnlyList<DateTime>? needed = null)
     {
+        _app = app;
         _rates = app.Rates;
         _needed = needed ?? [];
 
         Text = "Валутни курсове";
-        AsDialog(840, 620, 760, 460);
+        AsDialog(900, 640, 820, 460);
 
         BuildGrid();
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
@@ -63,7 +77,7 @@ internal sealed class RatesForm : AppForm
         _rates.Changed += RefreshState;
         _rates.Arrived += RefreshRates;
         RefreshState();
-        ShowNewestDay();
+        ShowNewest();
         EndLayout();
     }
 
@@ -109,10 +123,21 @@ internal sealed class RatesForm : AppForm
             e.SuppressKeyPress = true;
             RefreshRates();
         };
+        _view.SelectedIndexChanged += (_, _) => RefreshRates();
         _currency.SelectedIndexChanged += (_, _) => RefreshRates();
+        _export.Click += (_, _) => Export();
 
-        var filter = Make.Flow(Make.Label("За дата:"), back, _day, forward, Make.Gap(10), Make.Label("Валута:"), _currency, Make.Gap(6), _table);
-        filter.Margin = new Padding(9, 4, 9, 4);
+        _dayPart = Make.Flow(Make.Label("Дата:"), back, _day, forward);
+        _currencyPart = Make.Flow(Make.Label("Валута:"), _currency);
+        _table.Margin = new Padding(3, 1, 3, 4);
+
+        var filter = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, RowCount = 2, Margin = new Padding(9, 4, 9, 0) };
+        filter.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        filter.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        filter.Controls.Add(Make.Flow(Make.Label("Показвай:"), _view, Make.Gap(8), _dayPart, _currencyPart), 0, 0);
+        filter.Controls.Add(_export, 1, 0);
+        filter.Controls.Add(_table, 0, 1);
+        filter.SetColumnSpan(_table, 2);
         return filter;
 
         FlatButton Step(string text, int days)
@@ -120,7 +145,6 @@ internal sealed class RatesForm : AppForm
             var button = new FlatButton(text, ButtonLook.Quiet);
             button.Click += (_, _) =>
             {
-                _currency.SelectedIndex = 0;
                 _day.Text = Fmt.Date((CellValues.Date(_day.Text) ?? DateTime.Today).AddDays(days));
                 RefreshRates();
             };
@@ -137,7 +161,7 @@ internal sealed class RatesForm : AppForm
         _grid.AddColumn(new() { Header = "Код", Width = 60, Get = r => r.Code });
         _grid.AddColumn(new() { Header = "Валута", Width = 150, Fill = true, Get = r => r.Name });
         _grid.AddColumn(new() { Header = "За 1 евро", Width = 120, Right = true, Get = r => Fmt.Rate(r.PerEuro), SortKey = r => r.PerEuro, Tip = "Колко единици валута са едно евро" });
-        _grid.AddColumn(new() { Header = "Евро за единица", Width = 136, Right = true, Get = r => Fmt.Rate(1m / r.PerEuro), SortKey = r => 1m / r.PerEuro, Tip = "Колко евро е една единица валута" });
+        _grid.AddColumn(new() { Header = "Евро за единица", Width = 136, Right = true, Get = r => Fmt.Rate(1m / r.PerEuro), SortKey = r => 1m / r.PerEuro, Tip = "Колко евро е една единица валута – така е курсът в кол. A на файла за Делта Pro" });
         _grid.AddColumn(new() { Header = "Курс от", Width = 92, Get = r => Fmt.Date(r.Published), SortKey = r => r.Published, Tip = "В почивни дни важи последният публикуван курс" });
         _grid.SortRequested += RefreshRates;
     }
@@ -239,12 +263,18 @@ internal sealed class RatesForm : AppForm
 
     // ----- the rates -----
 
-    private void ShowNewestDay()
+    // The newest day, as the window was left the last time.
+    private void ShowNewest()
     {
+        _filling = true;   // everything at once
         var ranges = _rates.Ranges;
         _day.Text = Fmt.Date(ranges.Count > 0 ? ranges[^1].To : DateTime.Today);
+        _view.SelectedIndex = Math.Max(0, Array.FindIndex(Views, v => v.View == _app.RatesShown.View));
+        _filling = false;
         RefreshRates();
     }
+
+    private RateView View => Views[Math.Max(0, _view.SelectedIndex)].View;
 
     private void RefreshRates()
     {
@@ -252,13 +282,15 @@ internal sealed class RatesForm : AppForm
         _filling = true;
         try
         {
+            _dayPart.Visible = View == RateView.Day;
+            _currencyPart.Visible = View != RateView.Day;
             FillCurrencies();
-            Fill();
+            if (View == RateView.Day) ShowDay();
+            else ShowCurrency();
         }
         catch (DatabaseException ex)
         {
-            _grid.SetRows([]);
-            _table.Text = ex.Message;
+            ShowLines([], ex.Message);
         }
         finally
         {
@@ -268,44 +300,98 @@ internal sealed class RatesForm : AppForm
 
     private void FillCurrencies()
     {
+        string chosen = _currency.SelectedIndex >= 0 ? _currencies[_currency.SelectedIndex].Code : _app.RatesShown.Currency;
         var all = _rates.Store?.Currencies() ?? [];
-        if (all.SequenceEqual(_currencies) && _currency.Items.Count > 0) return;
+        if (!all.SequenceEqual(_currencies))
+        {
+            _currencies = all;
+            _currency.Items.Clear();
+            _currency.Items.AddRange([.. all.Select(c => (object)$"{c.Code} – {c.Name}")]);
+            int at = all.ToList().FindIndex(c => c.Code == chosen);
+            _currency.SelectedIndex = at >= 0 ? at : all.Count > 0 ? 0 : -1;
+        }
 
-        string chosen = _currency.Text;
-        _currencies = all;
-        _currency.Items.Clear();
-        _currency.Items.Add(AllCurrencies);
-        _currency.Items.AddRange([.. all.Select(c => (object)$"{c.Code} – {c.Name}")]);
-        _currency.SelectedIndex = Math.Max(0, _currency.Items.IndexOf(chosen));
+        _app.RatesShown = (View, _currency.SelectedIndex >= 0 ? _currencies[_currency.SelectedIndex].Code : chosen);
     }
 
-    private void Fill()
+    private void ShowDay()
     {
-        _table.Text = "";
-        if (_rates.Store is not { } store)
-        {
-            _grid.SetRows([]);
-            return;
-        }
-
-        if (_currency.SelectedIndex > 0)
-        {
-            var (code, name) = _currencies[_currency.SelectedIndex - 1];
-            _grid.SetRows(store.History(code).Select(r => new Row(r.Day, r.Published, code, name, r.PerEuro)));
-            return;
-        }
-
         if (CellValues.Date(_day.Text) is not { } day)
         {
-            _grid.SetRows([]);
-            _table.Text = "Въведете датата като 01.01.2026.";
+            ShowLines([], "Въведете датата като 01.01.2026.");
             return;
         }
 
-        var published = store.TableOf(day);
-        _grid.SetRows(store.RatesOf(day).Select(r => new Row(day, published!.Value, r.Row.Code, r.Row.Name, r.PerEuro)));
-        if (published == null) _table.Text = "за този ден няма изтеглен курс";
-        else if (published != day) _table.Text = $"важи курсът от {Fmt.Date(published)}";
+        var published = _rates.Store?.TableOf(day);
+        var lines = _rates.Store?.RatesOf(day).Select(r => new RateLine(day, r.Row.Code, r.Row.Name, r.PerEuro, published!.Value)) ?? [];
+        _title = $"Валутни курсове за {Fmt.Date(day)}";
+        _period = published is { } of && of != day ? $"Важи курсът от {Fmt.Date(of)}." : "";
+        _fileName = $"Курсове {Fmt.Date(day)}";
+        ShowLines(lines, published == null ? "За този ден няма изтеглен курс." : _period);
+    }
+
+    private void ShowCurrency()
+    {
+        if (_rates.Store is not { } store || _currency.SelectedIndex < 0)
+        {
+            ShowLines([], "Няма изтеглени курсове.");
+            return;
+        }
+
+        var (code, name) = _currencies[_currency.SelectedIndex];
+        var history = store.History(code);   // the newest first
+        if (history.Count == 0)
+        {
+            ShowLines([], "Няма изтеглени курсове.");
+            return;
+        }
+
+        var period = RateCalendar.PeriodOf(View, history[^1].Day, history[0].Day);
+        var lines = history.Where(r => r.Day >= period.From).Select(r => new RateLine(r.Day, code, name, r.PerEuro, r.Published)).ToList();
+        string dates = $"{Fmt.Date(period.From)} – {Fmt.Date(period.To)}", all = period.Days == 1 ? "1 ден" : $"{period.Days} дни";
+        _title = $"Валутни курсове – {code} ({name})";
+        _period = $"{dates}: " + (lines.Count == period.Days ? all : $"{lines.Count} от {all}") + (View switch
+        {
+            RateView.ThreeMonths => ", 3 месеца назад от последния курс.",
+            RateView.ThreeCalendarMonths => ", 3 календарни месеца до последния курс.",
+            _ => ".",
+        });
+        _fileName = $"Курсове {code} {Fmt.Date(period.From)}-{Fmt.Date(period.To)}";
+        ShowLines(lines, _period);
+    }
+
+    private void ShowLines(IEnumerable<RateLine> lines, string text)
+    {
+        _grid.SetRows(lines);
+        _table.Text = text;
+        _export.Enabled = _grid.Items.Count > 0;
+    }
+
+    // What is shown, in the order it is shown.
+    private void Export()
+    {
+        if (ExcelFiles.PickToSave(this, "Експорт на курсовете", _fileName + RatesWorkbook.Extension) is not { } path) return;
+
+        // Added, not changed: the dates in the name end like an extension.
+        if (!path.EndsWith(RatesWorkbook.Extension, StringComparison.OrdinalIgnoreCase)) path += RatesWorkbook.Extension;
+        string[] notes =
+        [
+            _period,
+            $"Източник: {_rates.SourceName} – курсовете на БНБ, от 2026 г. референтните на ЕЦБ. Записано на {DateTime.Now:dd.MM.yyyy HH:mm} от {AppInfo.Name} {AppInfo.VersionText}.",
+            "„За 1 евро“ са единиците валута за едно евро. „Евро за единица“ е обратното – курсът в кол. A на файла за Делта Pro.",
+        ];
+        try
+        {
+            RatesWorkbook.Write(path, _title, notes.Where(n => n.Length > 0).ToList(), _grid.Items);
+        }
+        catch (ConvertException ex)
+        {
+            Dialogs.Error(this, "Експортът не успя", ex.Message);
+            return;
+        }
+
+        if (_app.Settings.OpenAfterSave) ExcelFiles.Open(this, path);
+        else _table.Text = "Записано: " + path;
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)

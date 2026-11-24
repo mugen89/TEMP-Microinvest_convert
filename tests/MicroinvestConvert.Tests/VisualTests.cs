@@ -132,12 +132,11 @@ public class VisualTests
         {
             Show(form);
             Shot(form, Path.Combine(folder, "rates.png"));
-            var currencies = All(form).OfType<ComboBox>().Single();
-            for (int i = 0; i < currencies.Items.Count; i++)
-                if (currencies.Items[i]!.ToString()!.StartsWith("USD", StringComparison.Ordinal)) currencies.SelectedIndex = i;
+            var view = All(form).OfType<ComboBox>().First();   // a currency, for three calendar months
+            view.SelectedIndex = view.Items.Count - 1;
             All(form).OfType<TextBox>().First().Text = "40.01.2026";
             Pump();
-            Shot(form, Path.Combine(folder, "rates-usd.png"));
+            Shot(form, Path.Combine(folder, "rates-currency.png"));
         }
 
         app.Clients.Save(new ClientSettings { Name = "Тестова Фирма ЕООД", Eik = "123456786", VatNumber = "BG123456786", CashAccount = "501/1", Accounts = { ["401"] = "401/1" }, AccountCurrencies = { ["4012"] = "USD" } });

@@ -6,6 +6,22 @@ public readonly record struct DayRange(DateTime From, DateTime To)
     public int Days => (To - From).Days + 1;
 }
 
+/// <summary>What „Валутни курсове" shows.</summary>
+public enum RateView
+{
+    /// <summary>Every currency on one day.</summary>
+    Day,
+
+    /// <summary>One currency on every day there is.</summary>
+    Currency,
+
+    /// <summary>One currency, three months back from its last day.</summary>
+    ThreeMonths,
+
+    /// <summary>One currency, from the first of the month two months before that of its last day.</summary>
+    ThreeCalendarMonths,
+}
+
 /// <summary>Which days have to be asked for, and which answers are for good.</summary>
 public static class RateCalendar
 {
@@ -42,6 +58,20 @@ public static class RateCalendar
         published == day || day <= latest || (IsWeekend(day) && published == FridayBefore(day));
 
     private static DateTime FridayBefore(DateTime weekend) => weekend.AddDays(weekend.DayOfWeek == DayOfWeek.Saturday ? -1 : -2);
+
+    /// <summary>
+    /// The days of a currency that a view shows. They end with the last day there is a rate for,
+    /// whatever the date is today: with 23.11.2026 the three calendar months are from 01.09.2026.
+    /// </summary>
+    /// <param name="view">What is shown.</param>
+    /// <param name="first">The first day there is a rate for.</param>
+    /// <param name="last">The last one.</param>
+    public static DayRange PeriodOf(RateView view, DateTime first, DateTime last) => new(view switch
+    {
+        RateView.ThreeMonths => last.Date.AddMonths(-3),
+        RateView.ThreeCalendarMonths => new DateTime(last.Year, last.Month, 1).AddMonths(-2),
+        _ => first.Date,
+    }, last.Date);
 
     /// <summary>The days as a few periods.</summary>
     public static IReadOnlyList<DayRange> Ranges(IEnumerable<DateTime> days)

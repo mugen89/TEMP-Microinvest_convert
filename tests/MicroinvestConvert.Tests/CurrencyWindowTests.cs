@@ -154,8 +154,8 @@ public sealed class CurrencyWindowTests : IDisposable
         Leave(Field<TextBox>(form, "_day"));
         Assert.Equal(["DKK", "GBP", "USD"], Enumerable.Range(0, grid.RowCount).Select(r => (string)grid[1, r].Value!));
 
-        var currency = Field<ComboBox>(form, "_currency");
-        currency.SelectedItem = "USD – Щатски долар";
+        Field<ComboBox>(form, "_view").SelectedIndex = 1;
+        Field<ComboBox>(form, "_currency").SelectedItem = "USD – Щатски долар";
         Pump();
         Assert.Equal(app.Rates.Store!.Days().Count, grid.RowCount);
         Assert.All(Enumerable.Range(0, grid.RowCount), r => Assert.Equal("USD", grid[1, r].Value));
@@ -204,6 +204,181 @@ public sealed class CurrencyWindowTests : IDisposable
         Assert.Null(app.Rates.From);
         Assert.Empty(_messages);
     }, needed: [LongAgo]);
+
+    // ----- what is shown of the rates, and its export -----
+
+    /// <summary>The rates of every day of a period, as after a download.</summary>
+    private static void Fill(AppState app, string from, string to)
+    {
+        var days = RateCalendar.Days(SomeRates.Day(from), SomeRates.Day(to)).ToList();
+        app.Rates.Store!.Save(days.Where(d => !RateCalendar.IsWeekend(d)).Select(FakeSource.Table).ToList(),
+            days.Where(d => TableDay(d) >= days[0]).ToDictionary(d => d, TableDay));
+    }
+
+    private static DataGridView RatesGrid(Form form) => (DataGridView)Field<Control>(form, "_grid");
+
+    private static void Choose(Form form, RateView view, string currency = "")
+    {
+        Field<ComboBox>(form, "_view").SelectedIndex = (int)view;
+        if (currency.Length > 0) Field<ComboBox>(form, "_currency").SelectedItem = currency;
+        Pump();
+    }
+
+    private static (int Rows, string First, string Last, string Text) Shown(Form form)
+    {
+        var grid = RatesGrid(form);
+        return (grid.RowCount, Cell(grid, "Дата", 0), Cell(grid, "Дата", grid.RowCount - 1), Field<Label>(form, "_table").Text);
+    }
+
+    [Fact]
+    public void The_rates_of_a_currency_are_shown_for_three_periods() => WithRatesForm((form, app) =>
+    {
+        Assert.Equal(["Всички валути за дата", "Избрана валута – всички дни", "Избрана валута – 3 месеца назад", "Избрана валута – 3 календарни месеца"],
+            Field<ComboBox>(form, "_view").Items.Cast<object>().Select(o => o.ToString()));
+        Assert.Equal((3, "23.11.2026", "23.11.2026", ""), Shown(form));   // the newest day
+        Assert.Equal((true, false), (Field<Control>(form, "_dayPart").Visible, Field<Control>(form, "_currencyPart").Visible));
+
+        Choose(form, RateView.Currency);
+        Assert.Equal((false, true), (Field<Control>(form, "_dayPart").Visible, Field<Control>(form, "_currencyPart").Visible));
+        Assert.Equal("USD – Щатски долар", Field<ComboBox>(form, "_currency").Text);
+        Assert.Equal((146, "23.11.2026", "01.07.2026", "01.07.2026 – 23.11.2026: 146 дни."), Shown(form));
+        Choose(form, RateView.ThreeMonths, "GBP – Британска лира");
+        Assert.Equal((93, "23.11.2026", "23.08.2026", "23.08.2026 – 23.11.2026: 93 дни, 3 месеца назад от последния курс."), Shown(form));
+        Choose(form, RateView.ThreeCalendarMonths);
+        Assert.Equal((84, "23.11.2026", "01.09.2026", "01.09.2026 – 23.11.2026: 84 дни, 3 календарни месеца до последния курс."), Shown(form));
+        Assert.All(Enumerable.Range(0, 84), r => Assert.Equal("GBP", Cell(RatesGrid(form), "Код", r)));
+
+        Choose(form, RateView.Day);
+        Assert.Equal(3, RatesGrid(form).RowCount);
+        Assert.Empty(_messages);
+    }, prepare: app => Fill(app, "01.07.2026", "23.11.2026"));
+
+    [Fact]
+    public void A_period_that_is_not_all_there_says_so() => WithRatesForm((form, app) =>
+    {
+        Choose(form, RateView.ThreeCalendarMonths, "USD – Щатски долар");
+        Assert.Equal((22, "23.11.2026", "02.11.2026", "01.09.2026 – 23.11.2026: 22 от 84 дни, 3 календарни месеца до последния курс."), Shown(form));
+    }, prepare: app => Fill(app, "02.11.2026", "23.11.2026"));
+
+    [Fact]
+    public void Without_rates_there_is_nothing_to_show_and_to_export() => WithRatesForm((form, app) =>
+    {
+        foreach (var view in Enum.GetValues<RateView>())
+        {
+            Choose(form, view);
+            Assert.Equal((0, false), (RatesGrid(form).RowCount, Field<Button>(form, "_export").Enabled));
+        }
+
+        Assert.Equal("Няма изтеглени курсове.", Field<Label>(form, "_table").Text);
+    });
+
+    [Fact]
+    public void New_rates_show_by_themselves_whatever_is_shown() => WithRatesForm((form, app) =>
+    {
+        Choose(form, RateView.ThreeCalendarMonths);
+        Assert.Equal(0, RatesGrid(form).RowCount);
+        Field<TextBox>(form, "_from").Text = Text(LongAgo);
+        Click(form, "Изтегли сега");
+        Until(() => !app.Rates.IsRunning && RatesGrid(form).RowCount > 25);
+        Assert.Equal("USD – Щатски долар", Field<ComboBox>(form, "_currency").Text);
+        Assert.True(Field<Button>(form, "_export").Enabled);
+    });
+
+    [Fact]
+    public void The_window_is_as_it_was_left() => OnThread(() =>
+    {
+        using var app = NewApp(a => Fill(a, "01.07.2026", "23.11.2026"));
+        using (var form = new RatesForm(app))
+        {
+            Show(form);
+            Choose(form, RateView.ThreeMonths, "GBP – Британска лира");
+            form.Close();
+        }
+
+        using var again = new RatesForm(app);
+        Show(again);
+        Assert.Equal(("Избрана валута – 3 месеца назад", "GBP – Британска лира", 93),
+            (Field<ComboBox>(again, "_view").Text, Field<ComboBox>(again, "_currency").Text, RatesGrid(again).RowCount));
+    });
+
+    [Fact]
+    public void What_is_shown_is_exported_as_it_is_shown() => WithRatesForm((form, app) =>
+    {
+        app.Settings.OpenAfterSave = false;
+        string path = Path.Combine(_folder, "GBP 23.11.2026"), suggested = "";   // without an extension; the date is not one
+        ExcelFiles.PickToSaveInstead = name => { suggested = name; return path; };
+
+        Choose(form, RateView.ThreeCalendarMonths, "GBP – Британска лира");
+        Click(form, "Експорт в Excel…");
+        Assert.Equal(("Курсове GBP 01.09.2026-23.11.2026.xlsx", "Записано: " + path + ".xlsx"), (suggested, Field<Label>(form, "_table").Text));
+        using (var workbook = new NPOI.XSSF.UserModel.XSSFWorkbook(path + ".xlsx", true))
+        {
+            var sheet = workbook.GetSheetAt(0);
+            Assert.Equal("Валутни курсове – GBP (Британска лира)", sheet.GetRow(0).GetCell(0).StringCellValue);
+            Assert.Equal("01.09.2026 – 23.11.2026: 84 дни, 3 календарни месеца до последния курс.", sheet.GetRow(1).GetCell(0).StringCellValue);
+            Assert.StartsWith("Източник: проба", sheet.GetRow(2).GetCell(0).StringCellValue);
+            var grid = RatesGrid(form);
+            for (int r = 0; r < grid.RowCount; r++)
+            {
+                var row = sheet.GetRow(6 + r);
+                Assert.Equal((Cell(grid, "Дата", r), Cell(grid, "Код", r), Cell(grid, "Курс от", r)),
+                    (Text(row.GetCell(0).DateCellValue!.Value), row.GetCell(1).StringCellValue, Text(row.GetCell(5).DateCellValue!.Value)));
+                Assert.Equal(Cell(grid, "За 1 евро", r), Fmt.Rate((decimal)row.GetCell(3).NumericCellValue));
+            }
+
+            Assert.Equal(5 + grid.RowCount, sheet.LastRowNum);
+        }
+
+        // A day: all its currencies, and whose rates they are.
+        Choose(form, RateView.Day);
+        Field<TextBox>(form, "_day").Text = "22.11.2026";
+        Leave(Field<TextBox>(form, "_day"));
+        path = Path.Combine(_folder, "ден.xlsx");
+        Click(form, "Експорт в Excel…");
+        Assert.Equal("Курсове 22.11.2026.xlsx", suggested);
+        using (var workbook = new NPOI.XSSF.UserModel.XSSFWorkbook(path, true))
+            Assert.Equal(("Валутни курсове за 22.11.2026", "Важи курсът от 20.11.2026."),
+                (workbook.GetSheetAt(0).GetRow(0).GetCell(0).StringCellValue, workbook.GetSheetAt(0).GetRow(1).GetCell(0).StringCellValue));
+        Assert.Empty(_messages);
+    }, prepare: app => Fill(app, "01.07.2026", "23.11.2026"));
+
+    [Fact]
+    public void An_export_that_is_given_up_or_cannot_be_written() => WithRatesForm((form, app) =>
+    {
+        app.Settings.OpenAfterSave = false;
+        ExcelFiles.PickToSaveInstead = _ => null;
+        Click(form, "Експорт в Excel…");
+        Assert.Empty(Directory.GetFiles(_folder, "*.xlsx"));
+        Assert.Empty(_messages);
+
+        string path = Path.Combine(_folder, "отворен.xlsx");
+        File.WriteAllText(path, "в Excel");
+        ExcelFiles.PickToSaveInstead = _ => path;
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) Click(form, "Експорт в Excel…");
+        Assert.StartsWith("Експортът не успя", Assert.Single(_messages));
+        Assert.Equal("в Excel", File.ReadAllText(path));
+    }, prepare: app => Fill(app, "01.07.2026", "23.11.2026"));
+
+    [Theory]
+    [InlineData("Валутни курсове")]      // in the header
+    [InlineData("Валутни курсове…")]     // beside the days there are rates for
+    [InlineData("")]                     // the days themselves
+    public void The_window_opens_from_the_start_window(string button) => OnScreen((main, _) =>
+    {
+        bool opened = false;
+        using var timer = new System.Windows.Forms.Timer { Interval = 30 };
+        timer.Tick += (_, _) =>
+        {
+            if (Application.OpenForms.OfType<RatesForm>().FirstOrDefault() is not { } form) return;
+            opened = form.Owner == main;
+            timer.Stop();
+            form.Close();
+        };
+        timer.Start();
+        if (button.Length > 0) Click(main, button);   // comes back when the window is closed
+        else typeof(Control).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(Field<Label>(main, "_rates"), [EventArgs.Empty]);
+        Assert.True(opened);
+    });
 
     [Fact]
     public void Closing_the_window_keeps_the_date_that_was_typed() => WithRatesForm((form, app) =>
@@ -545,9 +720,9 @@ public sealed class CurrencyWindowTests : IDisposable
         act(main, app);
     });
 
-    private void WithRatesForm(Action<RatesForm, AppState> act, IReadOnlyList<DateTime>? needed = null) => OnThread(() =>
+    private void WithRatesForm(Action<RatesForm, AppState> act, IReadOnlyList<DateTime>? needed = null, Action<AppState>? prepare = null) => OnThread(() =>
     {
-        using var app = NewApp(null);
+        using var app = NewApp(prepare);
         using var form = new RatesForm(app, needed);
         Show(form);
         act(form, app);

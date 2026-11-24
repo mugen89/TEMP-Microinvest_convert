@@ -1,6 +1,11 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using MicroinvestConvert.Core.Exchange;
+using MicroinvestConvert.Core.Output;
+using MicroinvestConvert.Core.Source;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
 using MicroinvestConvert.Data;
 using static MicroinvestConvert.Tests.SomeRates;
 
@@ -392,5 +397,82 @@ public sealed class RateUpdaterTests : IDisposable
         {
             lock (seen) seen.Add(value);
         }
+    }
+}
+
+/// <summary>What „Валутни курсове" shows of a currency, and the workbook it is exported to.</summary>
+public class RateViewTests
+{
+    private static DateTime Day(string text) => SomeRates.Day(text);
+
+    [Theory]
+    [InlineData(RateView.ThreeCalendarMonths, "23.11.2026", "01.09.2026")]   // the owner's example
+    [InlineData(RateView.ThreeCalendarMonths, "01.12.2026", "01.10.2026")]
+    [InlineData(RateView.ThreeCalendarMonths, "30.11.2026", "01.09.2026")]
+    [InlineData(RateView.ThreeCalendarMonths, "15.01.2026", "01.11.2025")]
+    [InlineData(RateView.ThreeCalendarMonths, "28.02.2026", "01.12.2025")]
+    [InlineData(RateView.ThreeMonths, "23.11.2026", "23.08.2026")]
+    [InlineData(RateView.ThreeMonths, "31.05.2026", "28.02.2026")]
+    [InlineData(RateView.ThreeMonths, "29.02.2028", "29.11.2027")]
+    [InlineData(RateView.ThreeMonths, "10.01.2026", "10.10.2025")]
+    [InlineData(RateView.Currency, "23.11.2026", "01.01.2026")]
+    public void A_period_ends_with_the_last_day_there_is(RateView view, string last, string from) =>
+        Assert.Equal(new DayRange(Day(from), Day(last)), RateCalendar.PeriodOf(view, Day("01.01.2026"), Day(last)));
+
+    private static readonly RateLine[] Lines =
+    [
+        new(Day("23.11.2026"), "GBP", "Британска лира", 0.8437m, Day("23.11.2026")),
+        new(Day("22.11.2026"), "GBP", "Британска лира", 0.8401m, Day("20.11.2026")),
+        new(Day("21.11.2026"), "IDR", "Индонезийска рупия", 20071.37m, Day("20.11.2026")),
+    ];
+
+    [Fact]
+    public void The_workbook_has_dates_and_numbers_under_a_title()
+    {
+        using var workbook = new XSSFWorkbook(new MemoryStream(RatesWorkbook.Build("Валутни курсове – GBP", ["01.09.2026 – 23.11.2026", "Източник: проба"], Lines)));
+        var sheet = workbook.GetSheet(RatesWorkbook.SheetName);
+        Assert.Equal(["Валутни курсове – GBP", "01.09.2026 – 23.11.2026", "Източник: проба"], Enumerable.Range(0, 3).Select(r => sheet.GetRow(r).GetCell(0).StringCellValue));
+        Assert.Null(sheet.GetRow(3));
+        Assert.Equal(["Дата", "Код", "Валута", "За 1 евро", "Евро за единица", "Курс от"], sheet.GetRow(4).Cells.Select(c => c.StringCellValue));
+        Assert.Equal(4 + Lines.Length, sheet.LastRowNum);
+
+        for (int i = 0; i < Lines.Length; i++)
+        {
+            var row = sheet.GetRow(5 + i);
+            Assert.True(DateUtil.IsCellDateFormatted(row.GetCell(0)) && DateUtil.IsCellDateFormatted(row.GetCell(5)));
+            Assert.Equal((Lines[i].Day, Lines[i].Published), (row.GetCell(0).DateCellValue, row.GetCell(5).DateCellValue));
+            Assert.Equal((Lines[i].Code, Lines[i].Name), (row.GetCell(1).StringCellValue, row.GetCell(2).StringCellValue));
+            Assert.Equal((CellType.Numeric, (double)Lines[i].PerEuro), (row.GetCell(3).CellType, row.GetCell(3).NumericCellValue));
+            Assert.Equal(1 / (double)Lines[i].PerEuro, row.GetCell(4).NumericCellValue, 12);
+        }
+
+        // As Excel shows them: the date, every digit of the rate, and enough of the reverse one.
+        string Shown(int column) => new DataFormatter(CultureInfo.InvariantCulture).FormatCellValue(sheet.GetRow(5).GetCell(column));
+        Assert.Equal(("23.11.2026", "0.8437"), (Shown(0), Shown(3)));
+        Assert.StartsWith("1.185255", Shown(4));
+    }
+
+    [Fact]
+    public void It_is_written_whole_or_not_at_all()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "mic-rates-" + Guid.NewGuid() + ".xlsx");
+        try
+        {
+            RatesWorkbook.Write(path, "Курсове", [], Lines);
+            byte[] before = File.ReadAllBytes(path);
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))   // open in Excel
+                Assert.Contains("затворете го", Assert.Throws<ConvertException>(() => RatesWorkbook.Write(path, "Други", [], Lines)).Message);
+            Assert.Equal(before, File.ReadAllBytes(path));
+            Assert.False(File.Exists(path + ".tmp"));
+
+            var sheet = WorkbookLoader.Load(path).Single();   // also by the reader of the program
+            Assert.Equal(("Курсове", 2 + Lines.Length), (sheet.Name, sheet.Rows.Count(r => r.Any(c => c != null))));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+
+        Assert.Throws<ConvertException>(() => RatesWorkbook.Build("Курсове", [], []));
     }
 }
